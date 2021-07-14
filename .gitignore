@@ -1,1 +1,11 @@
+/.vscode
+/benchmark
 /dist
+/note
+/source3.8.5_sx/
+/source3.9.2_sx/*
+
+#white list
+!/source3.9.2_sx/readme_patch3.9.2nec13.txt
+
+
