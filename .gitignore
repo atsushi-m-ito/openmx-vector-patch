@@ -1,9 +1,12 @@
 /.vscode
 /benchmark
 /dist
+/public
 /note
 /source3.8.5_sx/
 /source3.9.2_sx/*
+!/source3.9.2_sx/elpa-2018.05.001
+/source3.9.2_sx/elpa-2018.05.001/*
 
 #white list
 !/source3.9.2_sx/readme*
@@ -30,7 +33,6 @@
 !/source3.9.2_sx/TRAN_CDen_Main.c
 !/source3.9.2_sx/TRAN_Poisson.c
 !/source3.9.2_sx/TRAN_Set_Electrode_Grid.c
-!/source3.9.2_sx/elpa-2018.05.001/elpa1_merge_systems_real_template.F90
 !/source3.9.2_sx/makefile
 !/source3.9.2_sx/openmx.c
 !/source3.9.2_sx/openmx_common.c
