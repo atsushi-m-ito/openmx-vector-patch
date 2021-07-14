@@ -6,7 +6,7 @@
 ###################################################################
 
 
-CC = mpincc -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -fopenmp -mno-create-threads-at-startup -Dnosse -finline-functions -finline-max-depth=5 -finline-max-function-size=500 
+CC = mpincc -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -fopenmp -mno-create-threads-at-startup -Dnosse -finline -finline-functions -finline-max-depth=5 -finline-max-function-size=500 -report-all
 FC = mpinfort -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -mno-create-threads-at-startup -fopenmp -static 
 LIB= -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp # -ftrace
 
@@ -470,11 +470,11 @@ lapack_dsteqr1.o: lapack_dsteqr1.c openmx_common.h lapack_prototypes.h
 Nonlocal_Basis.o: Nonlocal_Basis.c openmx_common.h
 	$(CC) -c Nonlocal_Basis.c
 Set_OLP_Kin.o: Set_OLP_Kin.c openmx_common.h 
-	$(CC) -c    -finline-file=RF_BesselF.c:Spherical_Bessel.c  Set_OLP_Kin.c
+	$(CC) -c -finline-file=RF_BesselF.c:Spherical_Bessel.c:openmx_common.c:Gaunt.c:Set_ProExpn_VNA.c  Set_OLP_Kin.c
 Set_Nonlocal.o: Set_Nonlocal.c openmx_common.h
 	$(CC) -c   -finline-file=RF_BesselF.c:Spherical_Bessel.c:dampingF.c:openmx_common.c  Set_Nonlocal.c
-Set_ProExpn_VNA.o: Set_ProExpn_VNA.c openmx_common.h
-	$(CC) -c   -finline-file=RF_BesselF.c:openmx_common.c:dampingF.c  Set_ProExpn_VNA.c
+Set_ProExpn_VNA.o: Set_ProExpn_VNA.c openmx_common.h Gaunt.h
+	$(CC) -c -finline-file=RF_BesselF.c:openmx_common.c:dampingF.c:Gaunt.c  Set_ProExpn_VNA.c
 Set_CoreHoleMatrix.o: Set_CoreHoleMatrix.c openmx_common.h
 	$(CC) -c -finline-file=dampingF.c    Set_CoreHoleMatrix.c
 Set_OLP_p.o: Set_OLP_p.c openmx_common.h 

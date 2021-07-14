@@ -21,6 +21,17 @@
 #include <omp.h>
 
 #define  measure_time  0
+
+#ifdef _FTRACE
+#include <ftrace.h>
+#else
+//dummy macro
+#define ftrace_region_begin(x)   
+#define ftrace_region_end(x)   
+#endif
+
+#define _NEC1717
+//#define _NEC_SPLIT_COMPLEX   //not faster//
  
 
 double Band_DFT_Col(
@@ -148,6 +159,12 @@ double Band_DFT_Col(
   int *index_Snd_i,*index_Snd_j,*index_Rcv_i,*index_Rcv_j;
   double *EVec_Snd,*EVec_Rcv;
 
+ftrace_region_begin("B1");
+#ifdef _NEC_SPLIT_COMPLEX
+  double *EVec1_r = (double*)malloc(sizeof(double) * na_cols*na_rows);
+  double *EVec1_i = (double*)malloc(sizeof(double) * na_cols*na_rows);;
+#endif
+
   /* for time */
   dtime(&TStime);
 
@@ -212,7 +229,7 @@ double Band_DFT_Col(
   if (lumos<60.0) lumos = 400.0;
   MaxN = (TZ-system_charge)/2 + (int)lumos;
   if (n<MaxN) MaxN = n;
-
+  
   /***********************************************
      allocation of arrays
   ***********************************************/
@@ -224,7 +241,8 @@ double Band_DFT_Col(
   /***********************************************
               k-points by regular mesh 
   ***********************************************/
-
+ftrace_region_end("B1");
+ftrace_region_begin("B2");
   if (way_of_kpoint==1){
 
     /**************************************************************
@@ -354,6 +372,8 @@ double Band_DFT_Col(
       T_k_op[k]    = NE_T_k_op[k];
     }
   }
+ftrace_region_end("B2");
+ftrace_region_begin("B3");
 
   /***********************************************
             calculate the sum of weights
@@ -421,6 +441,8 @@ double Band_DFT_Col(
       T_k_ID[myworld1][k] = Comm_World_StartID2[k];
     }
   }
+ftrace_region_end("B3");
+ftrace_region_begin("B4");
 
   /****************************************************
    find all_knum
@@ -430,6 +452,8 @@ double Band_DFT_Col(
   ****************************************************/
 
   MPI_Allreduce(&num_kloop0, &all_knum, 1, MPI_INT, MPI_PROD, mpi_comm_level1);
+ftrace_region_end("B4");
+ftrace_region_begin("B5");
 
   if (SpinP_switch==1 && numprocs0==1 && all_knum==1){
     all_knum = 0;
@@ -563,6 +587,8 @@ double Band_DFT_Col(
     EVec_Rcv = (double*)malloc(sizeof(double)*Max_Num_Rcv_EV*2);
 
   } /* if (all_knum==1) */
+ftrace_region_end("B5");
+ftrace_region_begin("B6");
 
   /****************************************************
      PrintMemory
@@ -587,6 +613,8 @@ double Band_DFT_Col(
       PrintMemory("Band_DFT_Col: EVec_Rcv", sizeof(double)*Max_Num_Rcv_EV*2,NULL);
     }
   }
+ftrace_region_end("B6");
+ftrace_region_begin("B7");
 
   /****************************************************
      communicate T_k_ID
@@ -608,6 +636,8 @@ double Band_DFT_Col(
      store in each processor all the matrix elements
         for overlap and Hamiltonian matrices
   ****************************************************/
+ftrace_region_end("B7");
+ftrace_region_begin("B8");
 
   if (measure_time) dtime(&Stime);
 
@@ -620,6 +650,8 @@ double Band_DFT_Col(
   if (SCF_iter==1 || all_knum!=1){
     size_H1 = Get_OneD_HS_Col(1, CntOLP, S1, MP, order_GA, My_NZeros, SP_NZeros, SP_Atoms);
   }
+ftrace_region_end("B8");
+ftrace_region_begin("B9");
 
 diagonalize1:
 
@@ -651,11 +683,13 @@ diagonalize1:
   /****************************************************
                       start kloop
   ****************************************************/
+ftrace_region_end("B9");
 
   dtime(&SiloopTime);
 
   for (kloop0=0; kloop0<num_kloop0; kloop0++){
 
+ftrace_region_begin("B10.1");
     kloop = S_knum + kloop0;
 
     k1 = T_KGrids1[kloop];
@@ -699,6 +733,9 @@ int *iArr = (int*) malloc(sizeof(int)*maxSize);
 int *jArr = (int*) malloc(sizeof(int)*maxSize);
 int *kArr = (int*) malloc(sizeof(int)*maxSize);
 #endif
+
+ftrace_region_end("B10.1");
+ftrace_region_begin("B10.2");
    for (AN=1; AN<=atomnum; AN++){
       GA_AN = order_GA[AN];
       wanA = WhatSpecies[GA_AN];
@@ -830,6 +867,9 @@ free(iArr);
 free(jArr);
 free(kArr);
 #endif 
+
+ftrace_region_end("B10.2");
+ftrace_region_begin("B10.3");
     /* diagonalize S */
 
     if (measure_time) dtime(&Stime);
@@ -866,6 +906,10 @@ free(kArr);
       time2 += Etime - Stime;
     }
 
+
+ftrace_region_end("B10.3");
+ftrace_region_begin("B10.4");
+
     if (SCF_iter==1 || all_knum!=1){
 
       if (3<=level_stdout){
@@ -898,6 +942,8 @@ free(kArr);
       }
     }
 
+ftrace_region_end("B10.4");
+ftrace_region_begin("B10.5");
     /****************************************************
      1.0/sqrt(ko[l]) * U^t * H * U * 1.0/sqrt(ko[l])
     ****************************************************/
@@ -916,6 +962,8 @@ free(kArr);
     Cblacs_barrier(ictxt2,"A");
     F77_NAME(pzgemm,PZGEMM)("N","N",&n,&n,&n,&alpha,Hs,&ONE,&ONE,descH,Ss,&ONE,&ONE,descS,&beta,Cs,&ONE,&ONE,descC);
 
+ftrace_region_end("B10.5");
+ftrace_region_begin("B10.6");
     /* 1.0/sqrt(ko[l]) * U^+ H * U * 1.0/sqrt(ko[l]) */
 
     for(i=0;i<na_rows*na_cols;i++){
@@ -931,6 +979,8 @@ free(kArr);
       time3 += Etime - Stime;
     }
 
+ftrace_region_end("B10.6");
+ftrace_region_begin("B10.7");
     /* diagonalize H' */
 
     if (measure_time) dtime(&Stime);
@@ -960,6 +1010,8 @@ free(kArr);
     MPI_Comm_free(&mpi_comm_rows);
     MPI_Comm_free(&mpi_comm_cols);
 
+ftrace_region_end("B10.7");
+ftrace_region_begin("B10.8");
     if (measure_time){
       dtime(&Etime);
       time4 += Etime - Stime;
@@ -982,6 +1034,7 @@ free(kArr);
       }
     }
 
+ftrace_region_end("B10.8");
     /**************************************************
       if (all_knum==1), wave functions are calculated. 
     **************************************************/
@@ -989,6 +1042,7 @@ free(kArr);
     if (measure_time) dtime(&Stime);
 
     if (all_knum==1){
+ftrace_region_begin("B10.10");
 
       for(i=0; i<na_rows*na_cols; i++){
         Hs[i].r = 0.0;
@@ -998,6 +1052,8 @@ free(kArr);
       F77_NAME(pzgemm,PZGEMM)("T","T",&n,&n,&n,&alpha,Cs,&ONE,&ONE,descS,Ss,&ONE,&ONE,descC,&beta,Hs,&ONE,&ONE,descH);
       Cblacs_barrier(ictxt2,"A");
 
+ftrace_region_end("B10.10");
+ftrace_region_begin("B10.11");
       /* MPI communications of Hs and store them to EVec1 */
 
       for (ID=0; ID<numprocs2; ID++){
@@ -1081,14 +1137,15 @@ free(kArr);
 
       } /* ID */
 
+ftrace_region_end("B10.11");
     } /* if (all_knum==1) */
 
     if (measure_time){
       dtime(&Etime);
       time5 += Etime - Stime;
     }
-
   } /* kloop0 */
+
 
   if (measure_time) dtime(&EiloopTime);
 
@@ -1103,10 +1160,14 @@ free(kArr);
      EIGEN
   ****************************************************/
 
+ftrace_region_begin("B11");
   if (measure_time){
     MPI_Barrier(mpi_comm_level1);
     dtime(&Stime);
   }
+
+ftrace_region_end("B11");
+ftrace_region_begin("B12");
 
   for (spin=0; spin<=SpinP_switch; spin++){
     for (kloop=0; kloop<T_knum; kloop++){
@@ -1126,6 +1187,8 @@ free(kArr);
          find chemical potential
   **************************************/
 
+ftrace_region_end("B12");
+ftrace_region_begin("B13");
   if (measure_time) dtime(&Stime);
   
   /* first, find ChemP at five times large temperatue */
@@ -1209,6 +1272,8 @@ free(kArr);
   }
   while (po==0 && loop_num<2000);
 
+ftrace_region_end("B13");
+ftrace_region_begin("B14");
   /* second, find ChemP at the temperatue, starting from the previously found ChemP. */
 
   po = 0;
@@ -1293,6 +1358,8 @@ free(kArr);
   }
   while (po==0 && loop_num<2000);
 
+ftrace_region_end("B14");
+ftrace_region_begin("B15");
   /****************************************************
            band energy in a finite temperature
   ****************************************************/
@@ -1374,6 +1441,8 @@ free(kArr);
     time7 += Etime - Stime;
   }
 
+ftrace_region_end("B15");
+ftrace_region_begin("B16");
   /****************************************************
          if all_knum==1, calculate CDM and EDM
   ****************************************************/
@@ -1812,6 +1881,8 @@ free(kArr);
 
   } /* if (all_knum==1) */
 
+ftrace_region_end("B16");
+//ftrace_region_begin("B17");
   if (measure_time){
     dtime(&Etime);
     time8 += Etime - Stime;
@@ -1838,11 +1909,12 @@ free(kArr);
     spin = myworld1;
 
   diagonalize2:
-
+ftrace_region_begin("B17.1");
     /* set S1 */
 
     size_H1 = Get_OneD_HS_Col(1, CntOLP, S1, MP, order_GA, My_NZeros, SP_NZeros, SP_Atoms);
-
+ftrace_region_end("B17.1");
+ftrace_region_begin("B17.2");
     /* set H1 */
 
     if (SpinP_switch==0){ 
@@ -1861,6 +1933,8 @@ free(kArr);
     else{
       size_H1 = Get_OneD_HS_Col(1, nh[spin], H1, MP, order_GA, My_NZeros, SP_NZeros, SP_Atoms);
     }
+ftrace_region_end("B17.2");
+ftrace_region_begin("B17.3");
 
     /* initialize CDM1 and EDM1 */
 
@@ -1893,11 +1967,13 @@ free(kArr);
 	}
       }
     }
+ftrace_region_end("B17.3");
 
     /* for kloop */
 
     for (kloop0=0; kloop0<num_kloop0; kloop0++){
 
+ftrace_region_begin("B17.4");
       kloop = kloop0 + S_knum;
 
       k1 = T_KGrids1[kloop];
@@ -1982,6 +2058,10 @@ free(kArr);
 	}
       }
 
+
+ftrace_region_end("B17.4");
+ftrace_region_begin("B17.5");
+
       /* diagonalize S */
 
       if (measure_time) dtime(&Stime);
@@ -2010,6 +2090,8 @@ free(kArr);
 
       MPI_Comm_free(&mpi_comm_rows);
       MPI_Comm_free(&mpi_comm_cols);
+ftrace_region_end("B17.5");
+ftrace_region_begin("B17.6");
 
       if (measure_time){
         dtime(&Etime);
@@ -2058,10 +2140,16 @@ free(kArr);
       Cs[i].r = 0.0;
       Cs[i].i = 0.0;
     }
+ftrace_region_end("B17.6");
+ftrace_region_begin("B17.7");
 
       Cblacs_barrier(ictxt2,"A");
+ftrace_region_end("B17.7");
+ftrace_region_begin("B17.8");
 
       F77_NAME(pzgemm,PZGEMM)("N","N",&n,&n,&n,&alpha,Hs,&ONE,&ONE,descH,Ss,&ONE,&ONE,descS,&beta,Cs,&ONE,&ONE,descC);
+ftrace_region_end("B17.8");
+ftrace_region_begin("B17.9");
 
       /* 1/sqrt(ko) * U^+ H * U * 1/sqrt(ko) */
 
@@ -2071,8 +2159,12 @@ free(kArr);
       }
 
       Cblacs_barrier(ictxt2,"C");
+ftrace_region_end("B17.9");
+ftrace_region_begin("B17.10");
 
       F77_NAME(pzgemm,PZGEMM)("C","N",&n,&n,&n,&alpha,Ss,&ONE,&ONE,descS,Cs,&ONE,&ONE,descC,&beta,Hs,&ONE,&ONE,descH);
+ftrace_region_end("B17.10");
+ftrace_region_begin("B17.11");
 
       /* diagonalize H' */
 
@@ -2083,6 +2175,8 @@ free(kArr);
 
       mpi_comm_rows_int = MPI_Comm_c2f(mpi_comm_rows);
       mpi_comm_cols_int = MPI_Comm_c2f(mpi_comm_cols);
+ftrace_region_end("B17.11");
+ftrace_region_begin("B17.12");
 
       if (scf_eigen_lib_flag==1){
         F77_NAME(solve_evp_complex,SOLVE_EVP_COMPLEX)
@@ -2106,6 +2200,8 @@ free(kArr);
         dtime(&Etime);
         time10 += Etime - Stime;
       }
+ftrace_region_end("B17.12");
+ftrace_region_begin("B17.13");
 
       if (3<=level_stdout && 0<=kloop){
 	printf("  kloop %i, k1 k2 k3 %10.6f %10.6f %10.6f\n",
@@ -2125,9 +2221,13 @@ free(kArr);
 	Hs[i].r = 0.0;
 	Hs[i].i = 0.0;
       }
+ftrace_region_end("B17.13");
+ftrace_region_begin("B17.14");
 
       F77_NAME(pzgemm,PZGEMM)("T","T",&n,&n,&n,&alpha,Cs,&ONE,&ONE,descS,Ss,&ONE,&ONE,descC,&beta,Hs,&ONE,&ONE,descH);
       Cblacs_barrier(ictxt2,"A");
+ftrace_region_end("B17.14");
+ftrace_region_begin("B17.15");
 
       /* Hs are stored to EVec1 */
 
@@ -2135,8 +2235,13 @@ free(kArr);
       for (j=0; j<na_cols; j++){
         for(i=0; i<na_rows; i++){
 
-	  EVec1[spin][k].r = Hs[j*na_rows+i].r;
-	  EVec1[spin][k].i = Hs[j*na_rows+i].i;
+#ifdef _NEC_SPLIT_COMPLEX
+          EVec1_r[k] = Hs[j*na_rows+i].r;
+          EVec1_i[k] = Hs[j*na_rows+i].i;
+#else
+          EVec1[spin][k].r = Hs[j*na_rows+i].r;
+          EVec1[spin][k].i = Hs[j*na_rows+i].i;
+#endif    
 
 	  k++;
 	}
@@ -2145,6 +2250,8 @@ free(kArr);
       /****************************************************
                      calculate DM and EDM
       ****************************************************/
+ftrace_region_end("B17.15");
+ftrace_region_begin("B17.16");
 
       if (measure_time) dtime(&Stime);
 
@@ -2167,8 +2274,13 @@ free(kArr);
 
 	for (i1=1; i1<=n; i1++){
 	  i = (i1-1)*n + k - 1;
+#ifdef _NEC_SPLIT_COMPLEX
+    EVec1_r[i] *= tmp1;
+    EVec1_i[i] *= tmp1;
+#else    
 	  EVec1[spin][i].r *= tmp1;
 	  EVec1[spin][i].i *= tmp1;
+#endif    
 	}
 
 	/* find kmax */
@@ -2178,6 +2290,15 @@ free(kArr);
 	  po = 1;         
 	}
       }    
+ftrace_region_end("B17.16");
+ftrace_region_begin("B17.17");
+
+#ifdef _NEC_SPLIT_COMPLEX
+	for (int i=0; i<na_cols*na_rows; i++){
+	  EVec1[spin][i].r = EVec1_r[i];
+	  EVec1[spin][i].i = EVec1_i[i];
+	}
+#endif    
 
       /* calculation of CDM1 and EDM1 */ 
 
@@ -2187,13 +2308,14 @@ free(kArr);
 	wanA = WhatSpecies[GA_AN];
 	tnoA = Spe_Total_CNO[wanA];
 	Anum = MP[GA_AN];
+//printf("AITUNE:tnoA=%d\n",tnoA);
 
 	for (LB_AN=0; LB_AN<=FNAN[GA_AN]; LB_AN++){
 
 	  GB_AN = natn[GA_AN][LB_AN];
 	  Rn = ncn[GA_AN][LB_AN];
 	  wanB = WhatSpecies[GB_AN];
-	  tnoB = Spe_Total_CNO[wanB];
+	  tnoB = Spe_Total_CNO[wanB];  
 	  Bnum = MP[GB_AN];
 
 	  l1 = atv_ijk[Rn][1];
@@ -2204,6 +2326,77 @@ free(kArr);
 	  co = cos(2.0*PI*kRn);
 
 	  for (i=0; i<tnoA; i++){
+#ifdef _NEC1717
+#define AI_TNOB_UNROLL_SIZE  (16)
+
+      if(tnoB <= AI_TNOB_UNROLL_SIZE){
+        
+	      const int i1 = (Anum + i - 1)*n - 1;
+	      
+	      double d1[AI_TNOB_UNROLL_SIZE] = {0.0};
+	      double d2[AI_TNOB_UNROLL_SIZE] = {0.0};
+        #pragma _NEC nointerchange
+        #pragma _NEC vector
+	      for (k=1; k<=MaxN; k++){
+          #pragma _NEC unroll(AI_TNOB_UNROLL_SIZE)
+          #pragma _NEC loop_count(AI_TNOB_UNROLL_SIZE)
+          #pragma _NEC nointerchange
+          for (j=0; j<AI_TNOB_UNROLL_SIZE; j++){
+            if(j<tnoB){
+              const int j1 = (Bnum + j - 1)*n - 1;
+
+#ifdef _NEC_SPLIT_COMPLEX
+              double ReA = EVec1_r[i1+k]*EVec1_r[j1+k] + EVec1_i[i1+k]*EVec1_i[j1+k]; 
+              double ImA = EVec1_r[i1+k]*EVec1_i[j1+k] - EVec1_i[i1+k]*EVec1_r[j1+k];
+#else
+              double ReA = EVec1[spin][i1+k].r*EVec1[spin][j1+k].r + EVec1[spin][i1+k].i*EVec1[spin][j1+k].i; 
+              double ImA = EVec1[spin][i1+k].r*EVec1[spin][j1+k].i - EVec1[spin][i1+k].i*EVec1[spin][j1+k].r;
+#endif
+#if 0
+              CDM1[p+j] += co*ReA - si*ImA;
+              EDM1[p+j] += (co*ReA - si*ImA)*EIGEN[spin][kloop][k];
+#elif 1
+              d1[j] += co*ReA - si*ImA;
+              d2[j] += (co*ReA - si*ImA)*EIGEN[spin][kloop][k];
+
+#else          
+              d1[j] += ReA;
+              d2[j] += ImA;
+              d3[j] += ReA*EIGEN[spin][kloop][k];
+              d4[j] += ImA*EIGEN[spin][kloop][k];
+#endif              
+	          }
+          }
+        }
+#if 0
+        
+          
+        p += tnoB;
+#elif 1
+        for (j=0; j<tnoB; j++){
+          CDM1[p+j] += d1[j];
+          EDM1[p+j] += d2[j];
+        }
+        p+=tnoB;
+#elif 1
+        for (j=0; j<tnoB; j++){
+          CDM1[p+j] += co*d1[j] - si*d2[j];
+          EDM1[p+j] += co*d3[j] - si*d4[j];
+        }
+        p+=tnoB;
+#else
+        for (j=0; j<tnoB; j++){
+          CDM1[p] += co*d1[j] - si*d2[j];
+          EDM1[p] += co*d3[j] - si*d4[j];
+          
+          /* increment of p */
+          p++;  
+        }
+#endif
+	    }
+      else
+      /* loop of j<tnoB is used even if _NEC1717 */
+#endif
 	    for (j=0; j<tnoB; j++){
 
 	      /***************************************************************
@@ -2244,6 +2437,7 @@ free(kArr);
 	      p++;  
 
 	    }
+
 	  }
 	}
       } /* GA_AN */
@@ -2252,6 +2446,7 @@ free(kArr);
         dtime(&Etime);
         time11 += Etime - Stime;
       }
+ftrace_region_end("B17.17");
 
     } /* kloop0 */
 
@@ -2259,11 +2454,14 @@ free(kArr);
          sum of CDM1 and EDM1 by Allreduce in MPI
     *******************************************************/
 
+ftrace_region_begin("B17.18");
     if (measure_time) dtime(&Stime);
 
     MPI_Allreduce(&CDM1[0], &H1[0], size_H1, MPI_DOUBLE, MPI_SUM, MPI_CommWD1[myworld1]);
     MPI_Allreduce(&EDM1[0], &S1[0], size_H1, MPI_DOUBLE, MPI_SUM, MPI_CommWD1[myworld1]);
 
+ftrace_region_end("B17.18");
+ftrace_region_begin("B17.19");
     /* CDM and EDM */
 
     k = 0;
@@ -2301,6 +2499,7 @@ free(kArr);
       }
     }
 
+ftrace_region_end("B17.19");
     if (measure_time){
       dtime(&Etime);
       time12 += Etime - Stime;
@@ -2314,6 +2513,7 @@ free(kArr);
     /* if necessary, MPI communication of CDM and EDM */
 
     if (1<numprocs0 && SpinP_switch==1){
+ftrace_region_begin("B17.20");
 
       /* set spin */
 
@@ -2355,10 +2555,14 @@ free(kArr);
 	  MPI_Wait(&request,&stat);
 	}
       }
+ftrace_region_end("B17.20");
+ftrace_region_begin("B17.21");
 
       MPI_Bcast(&CDM1[0], size_H1, MPI_DOUBLE, 0, MPI_CommWD1[myworld1]);
       MPI_Bcast(&EDM1[0], size_H1, MPI_DOUBLE, 0, MPI_CommWD1[myworld1]);
 
+ftrace_region_end("B17.21");
+ftrace_region_begin("B17.22");
       /* put CDM1 and EDM1 into CDM and EDM */
 
       k = 0;
@@ -2388,10 +2592,14 @@ free(kArr);
 	  }
 	}
       }
+      
+ftrace_region_end("B17.22");
     }
 
   } /* if (all_knum!=1) */
 
+//ftrace_region_end("B17");
+ftrace_region_begin("B18");
   /****************************************************
            normalization of CDM, EDM, and iDM 
   ****************************************************/
@@ -2427,6 +2635,8 @@ free(kArr);
     }
   }
 
+ftrace_region_end("B18");
+ftrace_region_begin("B19");
   /****************************************************
                        bond-energies
   ****************************************************/
@@ -2453,6 +2663,8 @@ free(kArr);
     }
   }
 
+ftrace_region_end("B19");
+ftrace_region_begin("B20");
   /* MPI, My_Eele1 */
   MPI_Barrier(mpi_comm_level1);
   for (spin=0; spin<=SpinP_switch; spin++){
@@ -2469,6 +2681,8 @@ free(kArr);
     printf("Eele10=%15.12f Eele11=%15.12f\n",Eele1[0],Eele1[1]);
   }
 
+ftrace_region_end("B20");
+ftrace_region_begin("B21");
   /****************************************************
                         output
   ****************************************************/
@@ -2527,6 +2741,11 @@ free(kArr);
   /****************************************************
                        free arrays
   ****************************************************/
+ 
+#ifdef _NEC_SPLIT_COMPLEX
+  free(EVec1_r);
+  free(EVec1_i);
+#endif
 
   free(My_NZeros);
   free(SP_NZeros);
@@ -2578,6 +2797,8 @@ free(kArr);
   MPI_Barrier(mpi_comm_level1);
   dtime(&TEtime);
   time0 = TEtime - TStime;
+  
+ftrace_region_end("B21");
   return time0;
 }
 
