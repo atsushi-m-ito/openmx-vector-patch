@@ -52,8 +52,8 @@ $ tar xvfz ../../patch3.9.2.tar.gz
 
 ```
 $ tar xvfz ../../openmx-vector-patch-vec13for3.9.2.tar.gz
-$ cp -p source3.9.2_sx/* ./
-$ rm -r source3.9.2_sx
+$ cp -rp openmx-vector-patch-vec13for3.9.2/source3.9.2_sx/* ./
+$ rm -r openmx-vector-patch-vec13for3.9.2/
 ```
 
 5. Check and modify the makefile according to your environment. And, Make it.
