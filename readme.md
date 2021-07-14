@@ -28,7 +28,7 @@ This section describes how to install the original OpenMX and how to apply this 
 
 ```
 $ ls 
-openmx3.9.tar.gz   patch3.9.2.tar.gz   patch_nec12_for392.tar.gz
+openmx3.9.tar.gz   patch3.9.2.tar.gz   openmx-vector-patch-vec13for3.9.2.tar.gz
 ```
 
 2. Expand the original OpenMX
@@ -43,15 +43,17 @@ DFT_DATA19   source   work
 3. Apply the original patch
 
 ```
-$ cp -rp source source392nec13
-$ cd source392nec13
+$ cp -rp source source392vec13
+$ cd source392vec13
 $ tar xvfz ../../patch3.9.2.tar.gz
 ```
 
 4. Apply the patch for VP
 
 ```
-$ tar xvfz ../../patch_nec12_for392.tar.gz
+$ tar xvfz ../../openmx-vector-patch-vec13for3.9.2.tar.gz
+$ cp -p source3.9.2_sx/* ./
+$ rm -r source3.9.2_sx
 ```
 
 5. Check and modify the makefile according to your environment. And, Make it.
