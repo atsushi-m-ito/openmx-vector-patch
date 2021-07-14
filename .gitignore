@@ -6,6 +6,37 @@
 /source3.9.2_sx/*
 
 #white list
-!/source3.9.2_sx/readme_patch3.9.2nec13.txt
+!/source3.9.2_sx/readme*
+!/source3.9.2_sx/Band_DFT_Col.c
+!/source3.9.2_sx/Band_DFT_NonCol.c
+!/source3.9.2_sx/Cluster_DFT_NonCol.c
+!/source3.9.2_sx/FT_PAO.c
+!/source3.9.2_sx/Force.c
+!/source3.9.2_sx/Gaunt.h
+!/source3.9.2_sx/Get_Cnt_dOrbitals.c
+!/source3.9.2_sx/Poisson.c
+!/source3.9.2_sx/Poisson_ESM.c
+!/source3.9.2_sx/RF_BesselF.c
+!/source3.9.2_sx/RadialF_nec.c
+!/source3.9.2_sx/Set_Density_Grid.c
+!/source3.9.2_sx/Set_Hamiltonian.c
+!/source3.9.2_sx/Set_Nonlocal.c
+!/source3.9.2_sx/Set_OLP_Kin.c
+!/source3.9.2_sx/Set_Orbitals_Grid.c
+!/source3.9.2_sx/Set_ProExpn_VNA.c
+!/source3.9.2_sx/Set_XC_Grid.c
+!/source3.9.2_sx/Spherical_Bessel.c
+!/source3.9.2_sx/Stress.c
+!/source3.9.2_sx/TRAN_CDen_Main.c
+!/source3.9.2_sx/TRAN_Poisson.c
+!/source3.9.2_sx/TRAN_Set_Electrode_Grid.c
+!/source3.9.2_sx/elpa-2018.05.001/elpa1_merge_systems_real_template.F90
+!/source3.9.2_sx/makefile
+!/source3.9.2_sx/openmx.c
+!/source3.9.2_sx/openmx_common.c
+!/source3.9.2_sx/readme_modification_list_SX-Aurora_based_on3.9.2.txt
+!/source3.9.2_sx/truncation.c
+!/source3.9.2_sx/elpa-2018.05.001/elpa1_merge_systems_real_template.F90
+
 
 
