@@ -748,7 +748,7 @@ void Associated_Legendre(int l, int m, double x, double ALeg[2])
    1/sqrt{1-x*x}*(l*x*Plm(x)-(l+m)*P{l-1}m(x))     
    where x=cos(theta)
   ******************************************************/
-  const double cut0=1.0e-15,cut1=1.0e-20;
+  double cut0=1.0e-24,cut1=1.0e-12; /*corresponding to 3.9.1 to keep accuracy of runtest*/
   //double p0,p1,dP; 
   //int i,ll;
   
