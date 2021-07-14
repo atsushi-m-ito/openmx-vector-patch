@@ -15,8 +15,8 @@ This patch for vector processors(VP) will be distributed according to the origin
 
 |Patch for VP ver.| Original OpenMX ver.|
 |---|---|
-| nec14 | 3.9.2 |
-| nec13 | 3.9.2 |
+| vec14 | 3.9.2 |
+| vec13 | 3.9.2 |
 | none  | 3.9.1 |
 | none  | 3.9.0 | 
 
