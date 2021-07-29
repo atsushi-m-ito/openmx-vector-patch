@@ -74,11 +74,16 @@ $ ./openmx -runtestL
 ```
 
 
-# Licenses
+## Reference
+
+The contents of tuning are summarized in the paper[^2]. When using this code, it would be appreciated if you can cite this paper.
+
+
+## Licenses
 
 Both the original OpenMX code and the patch for VP are licensed as GPL3.
 
 
-
-
 [^1]: http://www.openmx-square.org/
+
+[^2]: [Atsushi M. Ito, Arimichi Takayama, Osamu Watanabe, Vijendra Singh, Shubham Tyagi, and Shashank S. Singh, "Tuning of Density Functional Theory Simulation on Vector Processor System - Plasma Simulator Raijin -" Plasma and Fusion Research, Rapid Communications, 15 (2020) 1203085.](http://www.jspf.or.jp/PFR/PFR_articles/pfr2020/pfr2020_15-1203085.html)
