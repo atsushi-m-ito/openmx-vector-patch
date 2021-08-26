@@ -6,7 +6,7 @@
 
   Log of TRAN_Poisson.c:
 
-     09/July/2008  Released by T.Ozaki
+     09/July/2008  Released by T. Ozaki
 
 ***********************************************************************/
 
@@ -42,19 +42,19 @@ static void FFT1D_Poisson(double *ReRhok, double *ImRhok,
                           dcomplex **VHart_Boundary_b);
 static void Inverse_FFT1D_Poisson(double *ReRhok, double *ImRhok); 
 
-static double TRAN_Poisson_FD(double *ReRhok, double *ImRhok);
+static double TRAN_Poisson_FD(double *ReRhok, double *ImRhok,int SCF_iter,int TRAN_SCF_Iter_Band,int SucceedReadingDMfile);
 static double TRAN_Poisson_FFT(double *ReRhok, double *ImRhok);
 
 
-  
-double TRAN_Poisson(double *ReRhok, double *ImRhok)
+
+double TRAN_Poisson(double *ReRhok, double *ImRhok,int SCF_iter,int TRAN_SCF_Iter_Band,int SucceedReadingDMfile)
 { 
   double time;
 
   switch (TRAN_Poisson_flag){
 
     case 1:
-      time = TRAN_Poisson_FD(ReRhok, ImRhok);
+      time = TRAN_Poisson_FD(ReRhok, ImRhok, SCF_iter, TRAN_SCF_Iter_Band,SucceedReadingDMfile);
     break;
 
     case 2:
@@ -93,27 +93,27 @@ double TRAN_Poisson_FFT(double *ReRhok, double *ImRhok)
 
   MPI_Comm_size(mpi_comm_level1,&numprocs);
   MPI_Comm_rank(mpi_comm_level1,&myid);
-
+  
   if (myid==Host_ID) printf("<TRAN_Poisson_FFT>  Solving Poisson's equation...\n");
-
+  
   MPI_Barrier(mpi_comm_level1);
   dtime(&TStime);
-
+  
   /****************************************************
                  FFT of charge density 
   ****************************************************/
-
+  
   FFT_Density(0,ReRhok,ImRhok);
-
+  
   /****************************************************
                        4*PI/G2/N^3
   ****************************************************/
-
+  
   tmp0 = 4.0*PI/(double)(Ngrid1*Ngrid2*Ngrid3);
-
+  
   N2D = Ngrid3*Ngrid2;
   GNs = ((myid*N2D+numprocs-1)/numprocs)*Ngrid1;
-
+  
   for (BN_CB=0; BN_CB<My_NumGridB_CB; BN_CB++){
 
     GN = BN_CB + GNs;     
@@ -208,6 +208,11 @@ double TRAN_Poisson_FFT(double *ReRhok, double *ImRhok)
   N2D = Ngrid1*Ngrid2;
   GNs = ((myid*N2D+numprocs-1)/numprocs)*Ngrid3;
 
+  v0 = Av_dVH0 - Av_dVH_FFT0;
+  v1 = Av_dVH1 - Av_dVH_FFT1;
+
+  //printf("ABC1 myid=%2d %15.12f %15.12f   %15.12f %15.12f\n",myid,Av_dVH0,Av_dVH_FFT0,Av_dVH1,Av_dVH_FFT1);
+
   for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
 
     GN = BN_AB + GNs;     
@@ -232,18 +237,18 @@ double TRAN_Poisson_FFT(double *ReRhok, double *ImRhok)
   if      (0.1<fabs(tv[1][1])) ip = 1;
   else if (0.1<fabs(tv[1][2])) ip = 2;
   else if (0.1<fabs(tv[1][3])) ip = 3;
-
+  
   cc = 0.0;
   for (i=1; i<=Catomnum; i++){
     cc += Gxyz[Latomnum+i][ip];
   }  
   cc /= (double)Catomnum;
-
+  
   a = 1.0*( fabs(tv[1][ip]) - fabs(Left_tv[1][ip]) - fabs(Right_tv[1][ip]) );
-
+  
   N2D = Ngrid1*Ngrid2;
   GNs = ((myid*N2D+numprocs-1)/numprocs)*Ngrid3;
-
+  
   for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
 
     GN = BN_AB + GNs;     
@@ -257,6 +262,17 @@ double TRAN_Poisson_FFT(double *ReRhok, double *ImRhok)
     dVHart_Grid_B[BN_AB] += gateV;
   }
 
+
+  /*
+  j = Ngrid2/2;
+  k = Ngrid3/2;
+
+  for (i=0; i<Ngrid1; i++){
+    GN = i*Ngrid2*Ngrid3 + j*Ngrid2 + k;    
+    printf("%3d %15.12f\n",i,dVHart_Grid_B[GN]);
+  }
+  */
+
   /* for time */
   MPI_Barrier(mpi_comm_level1);
   dtime(&TEtime);
@@ -267,7 +283,7 @@ double TRAN_Poisson_FFT(double *ReRhok, double *ImRhok)
 
 
 
-double TRAN_Poisson_FD(double *ReRhok, double *ImRhok)
+double TRAN_Poisson_FD(double *ReRhok, double *ImRhok,int SCF_iter,int TRAN_SCF_Iter_Band,int SucceedReadingDMfile)
 { 
   int i,j,k,k1,k2,k3,ip;
   int GN,BN_AB,GNs,BN_CB,N2D;
@@ -348,12 +364,12 @@ double TRAN_Poisson_FD(double *ReRhok, double *ImRhok)
 
     /* set B */
 
-    for (k1=0; k1<(Ngrid1-0); k1++){
+    for (k1=0; k1<Ngrid1; k1++){
       B[k1].r = -4.0*PI*da2*ReRhok[BN_CB+k1];
       B[k1].i = -4.0*PI*da2*ImRhok[BN_CB+k1];
     }
 
-    /* add the boundary condition */
+    /* add the boundary conditions */
 
     B[0       ].r -= VHart_Boundary[0][Ngrid1_e[0]-1][k2][k3].r;
     B[0       ].i -= VHart_Boundary[0][Ngrid1_e[0]-1][k2][k3].i;
@@ -370,18 +386,64 @@ double TRAN_Poisson_FD(double *ReRhok, double *ImRhok)
 
     /* store B to ReRhok and ImRhok */
 
-    for (k1=0; k1<(Ngrid1-0); k1++){
+    for (k1=0; k1<Ngrid1; k1++){
       ReRhok[BN_CB+k1] = B[k1].r;
       ImRhok[BN_CB+k1] = B[k1].i;
     }
 
-  } /* BN2 */
+    /* initial treatment when the NEGF calculation starts */
+
+    if ( TRAN_Band2NEGF_Hartree==1 && TRAN_SCF_Iter_Band<SCF_iter && (SCF_iter-TRAN_SCF_Iter_Band)<=5 && SucceedReadingDMfile!=1){
+
+      double v0r,v0i,v1r,v1i,ar,br,ai,bi,vr,vi,coe0,coe1;
+
+      if      ((SCF_iter-TRAN_SCF_Iter_Band)==1) { coe0 = 0.05; coe1 = 0.95; }
+      else if ((SCF_iter-TRAN_SCF_Iter_Band)==2) { coe0 = 0.15; coe1 = 0.85; }
+      else if ((SCF_iter-TRAN_SCF_Iter_Band)==3) { coe0 = 0.25; coe1 = 0.75; }
+      else if ((SCF_iter-TRAN_SCF_Iter_Band)==4) { coe0 = 0.50; coe1 = 0.50; }
+      else if ((SCF_iter-TRAN_SCF_Iter_Band)==5) { coe0 = 0.75; coe1 = 0.25; }
+
+      v0r = VHart_Boundary[0][Ngrid1_e[0]-1][k2][k3].r; 
+      v0i = VHart_Boundary[0][Ngrid1_e[0]-1][k2][k3].i; 
+      v1r = VHart_Boundary[1][0            ][k2][k3].r;
+      v1i = VHart_Boundary[1][0            ][k2][k3].i;
+
+      ar = (v1r - v0r)/(double)(Ngrid1+1);
+      br = ar + v0r; 
+      ai = (v1i - v0i)/(double)(Ngrid1+1);
+      bi = ai + v0i;
+
+      for (k1=0; k1<Ngrid1; k1++){
+
+        vr = ar*(double)k1 + br;
+        vi = ai*(double)k1 + bi;
+        ReRhok[BN_CB+k1] = coe0*ReRhok[BN_CB+k1] + coe1*vr;
+        ImRhok[BN_CB+k1] = coe0*ImRhok[BN_CB+k1] + coe1*vi;
+      }
+    }
+
+  } /* BN_CB */
 
   /****************************************************
         find the Hartree potential in real space
   ****************************************************/
  
   Get_Value_inReal2D(0,dVHart_Grid_B,NULL,ReRhok,ImRhok);
+
+  /*
+  j = Ngrid2/2;
+  k = Ngrid3/2;
+
+  for (i=0; i<Ngrid1; i++){
+    GN = i*Ngrid2*Ngrid3 + j*Ngrid2 + k;    
+    printf("%3d %15.12f\n",i,dVHart_Grid_B[GN]);
+  }
+  */
+
+  /*
+  MPI_Finalize();
+  exit(0);
+  */
 
   /****************************************************
                apply the gate voltage
@@ -410,10 +472,22 @@ double TRAN_Poisson_FD(double *ReRhok, double *ImRhok)
     k = GN - i*Ngrid2*Ngrid3 - j*Ngrid3; 
 
     cv = (double)i*length_gtv[1] + Grid_Origin[ip];
+
     /* modified by mari 12.22.2014 */
+
     gateV = tran_gate_voltage[0]*exp( -pow( (cv-cc)/a, 8.0) );
     dVHart_Grid_B[BN_AB] += gateV;
   }
+
+  /*
+  j = Ngrid2/2;
+  k = Ngrid3/2;
+
+  for (i=0; i<Ngrid1; i++){
+    GN = i*Ngrid2*Ngrid3 + j*Ngrid2 + k;    
+    printf("%3d %15.12f\n",i,dVHart_Grid_B[GN]);
+  }
+  */
 
   /****************************************************
                    freeing of arrays
@@ -1223,12 +1297,14 @@ double TRAN_Poisson_FDG(double *ReRhok, double *ImRhok)
     }         
 
     /* scale terms with Gpara=0 */ 
-
-/*    if (k2==0 && k3==0){
-        for (k1=0; k1<Ngrid1; k1++){
-          ReRhok[BN_CB+k1] *= TRAN_Poisson_Gpara_Scaling;
-        }
-      } because default value = 1.0 */
+  
+    /*   
+    if (k2==0 && k3==0){
+      for (k1=0; k1<Ngrid1; k1++){
+        ReRhok[BN_CB+k1] *= TRAN_Poisson_Gpara_Scaling;
+      }
+    } because default value = 1.0 
+    */
 
     /* set B */
 

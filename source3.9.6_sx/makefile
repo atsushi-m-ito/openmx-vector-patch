@@ -7,8 +7,10 @@
 
 
 CC = mpincc -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -fopenmp -mno-create-threads-at-startup -Dnosse -finline -finline-functions -finline-max-depth=5 -finline-max-function-size=500 -report-all
+#CC = mpincc -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -fopenmp -mno-create-threads-at-startup -I/opt/nec/ve/nlc/2.3.0/include -Dnosse -finline -finline-functions -finline-max-depth=5 -finline-max-function-size=500 -report-all
 FC = mpinfort -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -mno-create-threads-at-startup -fopenmp -static 
-LIB= -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp # -ftrace
+LIB=  -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp -ftrace
+#LIB= -L/opt/nec/ve/lib/ -L/opt/nec/ve/nlc/2.3.0/lib/ -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp -ftrace
 
 #
 # System B (Sekirei) at ISSP, Univ. of Tokyo
@@ -94,7 +96,8 @@ OBJS    = openmx.o openmx_common.o Input_std.o Inputtools.o init.o LU_inverse.o 
           EulerAngle_Spin.o Smoothing_Func.o Orbital_Moment.o Pot_NeutralAtom.o Simple_Mixing_DM.o \
           DIIS_Mixing_DM.o ADIIS_Mixing_DM.o GR_Pulay_DM.o Kerker_Mixing_Rhok.o DIIS_Mixing_Rhok.o \
           Total_Energy.o Contract_Hamiltonian.o Contract_iHNL.o Cont_Matrix0.o Cont_Matrix1.o Cont_Matrix2.o \
-          Cont_Matrix3.o Cont_Matrix4.o Opt_Contraction.o Initial_CntCoes.o Initial_CntCoes2.o Set_XC_Grid.o \
+          Cont_Matrix3.o Cont_Matrix4.o Opt_Contraction.o Initial_CntCoes.o Initial_CntCoes2.o \
+		  Set_XC_Grid.o Set_XC_NL1_Grid.o \
           Get_Orbitals.o Get_dOrbitals.o Get_Cnt_Orbitals.o \
           Get_Cnt_dOrbitals.o Gaunt.o Find_CGrids.o MD_pac.o \
           RestartFileDFT.o Output_CompTime.o Merge_LogFile.o Make_FracCoord.o \
@@ -400,6 +403,9 @@ Initial_CntCoes2.o: Initial_CntCoes2.c openmx_common.h
 
 Set_XC_Grid.o: Set_XC_Grid.c openmx_common.h
 	$(CC)  -c -finline-file=XC_EX.c:XC_PW92C.c:openmx_common.c Set_XC_Grid.c
+Set_XC_NL1_Grid.o: Set_XC_NL1_Grid.c openmx_common.h
+	$(CC) -c Set_XC_NL1_Grid.c
+
 Get_Orbitals.o: Get_Orbitals.c openmx_common.h
 	$(CC) -c  -finline-file=openmx_common.c  Get_Orbitals.c
 Get_dOrbitals.o: Get_dOrbitals.c openmx_common.h
@@ -709,7 +715,7 @@ jx: $(OBJ_jx)
 
 #
 #
-#  transition probability between two states */
+#  transition probability between two states 
 #
 #
 
@@ -998,7 +1004,7 @@ elpa_solve_evp_complex_2stage_double_impl.o: $(LIBELPADIR)/elpa_solve_evp_comple
 
 #
 #
-# bandgnu13
+# bandgnu13 and other utilities
 #
 #
 
@@ -1012,6 +1018,8 @@ intensity_map: intensity_map.c
 	   gcc intensity_map.c -lm -o intensity_map
 md2axsf: md2axsf.c
 	   gcc md2axsf.c -lm -o md2axsf
+gcube2oned: gcube2oned.c
+	   gcc gcube2oned.c -lm -o gcube2oned
 
 #
 #

@@ -17,6 +17,7 @@
 #include <time.h>
 #include "openmx_common.h"
 #include "lapack_prototypes.h"
+#include "tran_variables.h"
 #include "mpi.h"
 #include <omp.h>
 
@@ -146,11 +147,8 @@ double Band_DFT_Col(
   int mpi_comm_rows_int,mpi_comm_cols_int;
   int info,ig,jg,il,jl,prow,pcol,brow,bcol;
   int ZERO=0, ONE=1;
-  #ifndef _NEC
-  double alpha = 1.0; double beta = 0.0;
-  #else
-  dcomplex alpha = {1.0, 0.0}; dcomplex beta = {0.0, 0.0};
-  #endif
+  dcomplex alpha = {1.0,0.0}; dcomplex beta = {0.0,0.0};
+
   int LOCr, LOCc, node, irow, icol;
   double mC_spin_i1,C_spin_i1;
 
@@ -225,8 +223,8 @@ ftrace_region_begin("B1");
      find the number of states to be solved 
   ***********************************************/
 
-  lumos = (double)n*0.200;
-  if (lumos<60.0) lumos = 400.0;
+  lumos = 0.4*((double)TZ-(double)system_charge)/2.0;
+  if (lumos<50.0) lumos = 100.0;
   MaxN = (TZ-system_charge)/2 + (int)lumos;
   if (n<MaxN) MaxN = n;
   
@@ -681,7 +679,7 @@ diagonalize1:
   }
 
   /****************************************************
-                      start kloop
+                       start kloop
   ****************************************************/
 ftrace_region_end("B9");
 
@@ -1189,6 +1187,63 @@ ftrace_region_begin("B12");
 
 ftrace_region_end("B12");
 ftrace_region_begin("B13");
+
+
+  /* for XANES */
+  if (xanes_calc==1){
+
+    for (spin=0; spin<=SpinP_switch; spin++){
+
+      po = 0;
+      loop_num = 0;
+      ChemP_MAX = 20.0;  
+      ChemP_MIN =-20.0;
+
+      do {
+
+	loop_num++;
+
+	ChemP = 0.50*(ChemP_MAX + ChemP_MIN);
+	Num_State = 0.0;
+
+	for (kloop=0; kloop<T_knum; kloop++){
+
+	  for (l=1; l<=MaxN; l++){
+
+	    x = (EIGEN[spin][kloop][l] - ChemP)*Beta;
+
+	    if (x<=-x_cut) x = -x_cut;
+	    if (x_cut<=x)  x =  x_cut;
+	    FermiF = FermiFunc(x,spin,l,&l,&x);
+	    Num_State += FermiF*(double)T_k_op[kloop];
+	  } 
+	}  
+
+	if (SpinP_switch==0)  Num_State = 2.0*Num_State/sum_weights;
+	else                  Num_State = Num_State/sum_weights;
+	Dnum = HOMO_XANES[spin] - Num_State;
+
+	if (0.0<=Dnum) ChemP_MIN = ChemP;
+	else           ChemP_MAX = ChemP;
+	if (fabs(Dnum)<10e-14) po = 1;
+      }
+      while (po==0 && loop_num<2000);
+
+      ChemP_XANES[spin] = ChemP;
+      Cluster_HOMO[spin] = HOMO_XANES[spin];
+
+    } /* spin loop */
+
+    /* set ChemP */
+
+    ChemP = 0.5*(ChemP_XANES[0] + ChemP_XANES[1]); 
+
+  } /* end of if (xanes_calc==1) */
+
+  /* start of else for if (xanes_calc==1) */
+
+  else{
+
   if (measure_time) dtime(&Stime);
   
   /* first, find ChemP at five times large temperatue */
@@ -1358,6 +1413,11 @@ ftrace_region_begin("B14");
   }
   while (po==0 && loop_num<2000);
 
+  } /* end of else for if (xanes_calc==1) */
+
+  /* for the NEGF calculation */
+  if (Solver==4 && TRAN_ChemP_Band==0) ChemP = 0.5*(ChemP_e[0]+ChemP_e[1]);
+
 ftrace_region_end("B14");
 ftrace_region_begin("B15");
   /****************************************************
@@ -1372,7 +1432,10 @@ ftrace_region_begin("B15");
     for (spin=0; spin<=SpinP_switch; spin++){
       for (l=1; l<=MaxN; l++){
 
-	x = (EIGEN[spin][kloop][l] - ChemP)*Beta;
+	if (xanes_calc==1) 
+          x = (EIGEN[spin][kloop][l] - ChemP_XANES[spin])*Beta;
+        else 
+          x = (EIGEN[spin][kloop][l] - ChemP)*Beta;
 
         if (x<=-x_cut) x = -x_cut;
 	if (x_cut<=x)  x = x_cut;
@@ -1483,7 +1546,12 @@ ftrace_region_begin("B16");
     for (k=is2[myid2]; k<=ie2[myid2]; k++){
 
       eig = EIGEN[spin][kloop][k];
-      x = (eig - ChemP)*Beta;
+
+      if (xanes_calc==1) 
+        x = (eig - ChemP_XANES[spin])*Beta;
+      else 
+        x = (eig - ChemP)*Beta;
+
       if (x<=-x_cut) x = -x_cut;
       if (x_cut<=x)  x = x_cut;
       FermiF = FermiFunc(x,spin,k,&k,&x);
@@ -1508,7 +1576,12 @@ ftrace_region_begin("B16");
     for (k=is2[myid2]; k<=ie2[myid2]; k++){
 
       eig = EIGEN[spin][kloop][k];
-      x = (eig - ChemP)*Beta;
+      
+      if (xanes_calc==1) 
+        x = (eig - ChemP_XANES[spin])*Beta;
+      else 
+        x = (eig - ChemP)*Beta;
+
       if (x<=-x_cut) x = -x_cut;
       if (x_cut<=x)  x = x_cut;
       FermiF = FermiFunc(x,spin,k,&k,&x);
@@ -1533,7 +1606,12 @@ ftrace_region_begin("B16");
     for (k=is2[myid2]; k<=ie2[myid2]; k++){
 
       eig = EIGEN[spin][kloop][k];
-      x = (eig - ChemP)*Beta;
+      
+      if (xanes_calc==1) 
+        x = (eig - ChemP_XANES[spin])*Beta;
+      else 
+        x = (eig - ChemP)*Beta;
+
       if (x<=-x_cut) x = -x_cut;
       if (x_cut<=x)  x = x_cut;
 	    FermiF = 1.0/(1.0 + exp(x));
@@ -2120,26 +2198,27 @@ ftrace_region_begin("B17.6");
       /* S * 1.0/sqrt(ko[l])  */
 
 
-    for(i=0;i<na_rows;i++){
-      for(j=0;j<na_cols;j++){
-	jg = np_cols*nblk*((j)/nblk) + (j)%nblk + ((np_cols+my_pcol)%np_cols)*nblk + 1;
-	Ss[j*na_rows+i].r = Ss[j*na_rows+i].r*ko[jg];
-	Ss[j*na_rows+i].i = Ss[j*na_rows+i].i*ko[jg];
+      for(i=0;i<na_rows;i++){
+	for(j=0;j<na_cols;j++){
+	  jg = np_cols*nblk*((j)/nblk) + (j)%nblk + ((np_cols+my_pcol)%np_cols)*nblk + 1;
+	  Ss[j*na_rows+i].r = Ss[j*na_rows+i].r*ko[jg];
+	  Ss[j*na_rows+i].i = Ss[j*na_rows+i].i*ko[jg];
+	}
       }
-    }
 
-    /****************************************************
-          1/sqrt(ko) * U^t * H * U * 1/sqrt(ko)
-    ****************************************************/
+      /****************************************************
+            1/sqrt(ko) * U^t * H * U * 1/sqrt(ko)
+      ****************************************************/
 
-    /* pzgemm */
+      /* pzgemm */
 
-    /* H * U * 1/sqrt(ko) */
+      /* H * U * 1/sqrt(ko) */
     
-    for(i=0;i<na_rows_max*na_cols_max;i++){
-      Cs[i].r = 0.0;
-      Cs[i].i = 0.0;
-    }
+      for(i=0;i<na_rows_max*na_cols_max;i++){
+	Cs[i].r = 0.0;
+	Cs[i].i = 0.0;
+      }
+
 ftrace_region_end("B17.6");
 ftrace_region_begin("B17.7");
 
@@ -2266,7 +2345,12 @@ ftrace_region_begin("B17.16");
       for (k=1; k<=MaxN; k++){
 
 	eig = EIGEN[spin][kloop][k];
-	x = (eig - ChemP)*Beta;
+	
+        if (xanes_calc==1) 
+  	  x = (eig - ChemP_XANES[spin])*Beta;
+        else 
+  	  x = (eig - ChemP)*Beta;
+
 	if (x<=-x_cut) x = -x_cut;
 	if (x_cut<=x)  x = x_cut;
 	FermiF = FermiFunc(x,spin,k,&k,&x);
@@ -2702,8 +2786,8 @@ ftrace_region_begin("B21");
       fprintf(fp_EV,"           Eigenvalues (Hartree) of SCF KS-eq.           \n");
       fprintf(fp_EV,"***********************************************************\n");
       fprintf(fp_EV,"***********************************************************\n\n");
-      fprintf(fp_EV,"   Chemical Potential (Hatree) = %18.14f\n",ChemP);
-      fprintf(fp_EV,"   Number of States            = %18.14f\n",Num_State);
+      fprintf(fp_EV,"   Chemical Potential (Hartree) = %18.14f\n",ChemP);
+      fprintf(fp_EV,"   Number of States             = %18.14f\n",Num_State);
       fprintf(fp_EV,"   Eigenvalues\n");
       fprintf(fp_EV,"              Up-spin           Down-spin\n");
 
@@ -2747,27 +2831,27 @@ ftrace_region_begin("B21");
   free(EVec1_i);
 #endif
 
-  free(My_NZeros);
-  free(SP_NZeros);
-  free(SP_Atoms);
-
   if (all_knum==1){
 
-    free(is1);
-    free(ie1);
-
-    free(is2);
-    free(ie2);
-
-    free(Num_Snd_EV);
-    free(Num_Rcv_EV);
-    free(index_Snd_i);
-    free(index_Snd_j);
-    free(EVec_Snd);
-    free(index_Rcv_i);
-    free(index_Rcv_j);
     free(EVec_Rcv);
+    free(index_Rcv_j);
+    free(index_Rcv_i);
+    free(EVec_Snd);
+    free(index_Snd_j);
+    free(index_Snd_i);
+
+    free(Num_Rcv_EV);
+    free(Num_Snd_EV);
+
+    free(ie2);
+    free(is2);
+    free(ie1);
+    free(is1);
   }
+
+  free(SP_Atoms);
+  free(SP_NZeros);
+  free(My_NZeros);
 
   /* for PrintMemory and allocation */
   firsttime=0;

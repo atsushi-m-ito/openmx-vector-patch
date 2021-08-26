@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-  Ver. 3.9 (26/July/2019)
+  Ver. 3.9 (13/Aug./2021)
 
   OpenMX (Open source package for Material eXplorer) is a program package
   for linear scaling density functional calculations of large-scale materials.
@@ -33,7 +33,7 @@
 
      Taisuke Ozaki
 
-     Present (23/Sep./2019) official address
+     Present (13/Aug./2021) official address
 
        Institute for Solid State Physics, University of Tokyo,
        Kashiwanoha 5-1-5, Kashiwa, Chiba 277-8581, Japan
@@ -506,7 +506,7 @@ int main(int argc, char *argv[])
     printf("\n*******************************************************\n"); 
     printf("*******************************************************\n"); 
     printf(" Welcome to OpenMX   Ver. %s                           \n",Version_OpenMX); 
-    printf(" Copyright (C), 2002-2019, T. Ozaki                    \n"); 
+    printf(" Copyright (C), 2002-2021, T. Ozaki                    \n"); 
     printf(" OpenMX comes with ABSOLUTELY NO WARRANTY.             \n"); 
     printf(" This is free software, and you are welcome to         \n"); 
     printf(" redistribute it under the constitution of the GNU-GPL.\n");
@@ -539,8 +539,8 @@ int main(int argc, char *argv[])
 
   /* for DFTD-vdW by okuno */
   /* for version_dftD by Ellner*/
-  if(dftD_switch==1 && version_dftD==2) DFTDvdW_init();
-  if(dftD_switch==1 && version_dftD==3) DFTD3vdW_init();
+  if (dftD_switch==1 && version_dftD==2) DFTDvdW_init();
+  if (dftD_switch==1 && version_dftD==3) DFTD3vdW_init();
 
   /* check "-mltest2" mode */
 
@@ -670,6 +670,7 @@ int main(int argc, char *argv[])
       iterout(MD_iter+MD_Current_Iter,MD_TimeStep*(MD_iter+MD_Current_Iter-1),filepath,filename);
 
       /* MD or geometry optimization */
+
       if (ML_flag==0) CompTime[myid][4] += MD_pac(MD_iter,argv[1]);
     }
     else{
@@ -753,28 +754,6 @@ int main(int argc, char *argv[])
                           GridN_Atom, GridListAtom, CellListAtom, 
                           Orbs_Grid, TNumGrid );
     }
-  }
-
-  /*********************************************************
-   calculations of core level spectra:
-
-   CLE_Type =-1; NONE 
-   CLE_Type = 0; XANES0: single particle calculation
-   CLE_Type = 1; XANES1: core excitation by delta-SCF
-   CLE_Type = 2; XANES2: core excitation with a valence 
-                         excitation by delta-SCF
-  **********************************************************/
-
-  /* calc. of overlap matrix with the position operator */
-
-  if (0<=CLE_Type){
-    Set_OLP_p(OLP_p);
-
-    /* XANES:  single particle calculation */
-    if (CLE_Type==0){
-      /* XANES0(); */
-    }
-
   }
 
   /****************************************************

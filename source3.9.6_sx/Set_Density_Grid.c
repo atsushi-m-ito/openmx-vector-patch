@@ -6,8 +6,8 @@
 
   Log of Set_Density_Grid.c:
 
-     22/Nov/2001  Released by T.Ozaki
-     19/Apr/2013  Modified by A.M.Ito     
+     22/Nov/2001  Released by T. Ozaki
+     19/Apr/2013  Modified by A.M. Ito     
 
 ***********************************************************************/
 

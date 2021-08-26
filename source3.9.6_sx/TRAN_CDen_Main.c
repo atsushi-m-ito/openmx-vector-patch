@@ -12,11 +12,11 @@
 #include "tran_prototypes.h"
 #include "tran_variables.h"
 
-void FFT2D_Poisson(double *ReRhor, double *ImRhor,
-  double *ReRhok, double *ImRhok);
+void FFT2D_Poisson(double *ReRhor, double *ImRhor, double *ReRhok, double *ImRhok);
 
-static void TRAN_Calc_Orb2Real(int NUM_c, int *MP, double **JOrb, double *JReal,
-  dcomplex *SCC)
+
+
+static void TRAN_Calc_Orb2Real(int NUM_c, int *MP, double **JOrb, double *JReal, dcomplex *SCC)
 {
   int myid;
   int Mc_AN, Gc_AN;
@@ -79,8 +79,11 @@ static void TRAN_Calc_Orb2Real(int NUM_c, int *MP, double **JOrb, double *JReal,
 
 } /*static void TRAN_Calc_Orb2Real*/
 
-static void TRAN_Current_dOrb(int NUM_c, int *MP,
-  double ***JSym, double **JASym, double **JReal)
+
+
+
+
+static void TRAN_Current_dOrb(int NUM_c, int *MP, double ***JSym, double **JASym, double **JReal)
 {
   int myid;
   int Mc_AN, Gc_AN;
@@ -187,6 +190,8 @@ static void TRAN_Current_dOrb(int NUM_c, int *MP,
   free(dorbs0);
 } /*static void TRAN_Current_dOrb*/
 
+
+
 static void TRAN_Integrate1D(double **Jmat, dcomplex **Jbound, double *Current)
 {
   int i1, i2, i3, iside, myid;
@@ -237,6 +242,10 @@ static void TRAN_Integrate1D(double **Jmat, dcomplex **Jbound, double *Current)
     } /*for (i2 = 0; i2 < Ngrid2; i2++)*/
   } /*for (iside = 0; iside < 2; iside++)*/
 } /* static void TRAN_Integrate1D */
+
+
+
+
 
 static void TRAN_Current_NonLoc(double *Rho, double **Current)
 {
@@ -1272,6 +1281,7 @@ void TRAN_CDen_Main(
   /*
   Allocate and initialize array
   */
+
   CDensity = (double***)malloc(sizeof(double**)*(SpinP_switch + 1));
   for (ispin = 0; ispin <= SpinP_switch; ispin++){
     CDensity[ispin] = (double**)malloc(sizeof(double*)*3);
@@ -1311,8 +1321,7 @@ void TRAN_CDen_Main(
     TRAN_Calc_Orb2Real(NUM_c, MP, Jmat[ispin][0], RJmat[0], SCC);
     TRAN_Calc_Orb2Real(NUM_c, MP, Jmat[ispin][1], RJmat[1], SCC);
 
-    TRAN_Current_dOrb(NUM_c, MP, JLocSym[ispin], 
-      JLocASym[ispin], CDensity[ispin]);
+    TRAN_Current_dOrb(NUM_c, MP, JLocSym[ispin], JLocASym[ispin], CDensity[ispin]);
     TRAN_Current_NonLoc(RRho, CDensity[ispin]);
 
     TRAN_Integrate1D(RJmat, Jbound, CDensity[ispin][0]);

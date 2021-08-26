@@ -26,11 +26,11 @@
 #endif 
 
 
-static void Inverse_FFT_Poisson(double *ReRhor, double *ImRhor, 
-                                double *ReRhok, double *ImRhok);
+void Inverse_FFT_Poisson(double *ReRhor, double *ImRhor, 
+                         double *ReRhok, double *ImRhok);
 
-static void FFT_Poisson(double *ReRhor, double *ImRhor, 
-                        double *ReRhok, double *ImRhok);  
+void FFT_Poisson(double *ReRhor, double *ImRhor, 
+                 double *ReRhok, double *ImRhok);  
 
 double Poisson(int fft_charge_flag,
                double *ReRhok, double *ImRhok)
@@ -137,6 +137,20 @@ double Poisson(int fft_charge_flag,
   
   Get_Value_inReal(0,dVHart_Grid_B,dVHart_Grid_B,ReRhok,ImRhok);
 
+  /*  
+  {
+    int i,j,k;
+
+    j = Ngrid2/2;
+    k = Ngrid3/2;
+  
+    for (i=0; i<Ngrid1; i++){
+      GN = i*Ngrid2*Ngrid3 + j*Ngrid2 + k;    
+      printf("%3d %15.12f\n",i,dVHart_Grid_B[GN]);
+    }
+  }
+  */
+  
   /****************************************************
     if (fft_charge_flag==2),
     copy the difference charge Hartree potential
@@ -178,6 +192,7 @@ void FFT_Poisson(double *ReRhor, double *ImRhor,
   static int firsttime=1;
   int i,BN_AB,BN_CB,BN_CA,gp,NN_S,NN_R;
   double *array0,*array1;
+  double *ReTmp,*ImTmp; 
   int numprocs,myid,tag=999,ID,IDS,IDR;
   double Stime_proc, Etime_proc;
   MPI_Status stat;
@@ -200,6 +215,16 @@ void FFT_Poisson(double *ReRhor, double *ImRhor,
 
   in  = fftw_malloc(sizeof(fftw_complex)*List_YOUSO[17]); 
   out = fftw_malloc(sizeof(fftw_complex)*List_YOUSO[17]); 
+
+  ReTmp = (double*)malloc(sizeof(double)*My_NumGridB_AB);
+  ImTmp = (double*)malloc(sizeof(double)*My_NumGridB_AB);
+
+  /* store ReRhor and ImRhor */
+
+  for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
+    ReTmp[BN_AB] = ReRhor[BN_AB];
+    ImTmp[BN_AB] = ImRhor[BN_AB];
+  }
 
   /*------------------ FFT along the C-axis in the AB partition ------------------*/
 
@@ -480,12 +505,22 @@ void FFT_Poisson(double *ReRhor, double *ImRhor,
     printf("myid=%2d  Time FFT-A  = %15.12f\n",myid,Etime_proc-Stime_proc);
   }
 
+  /* back to ReRhor and ImRhor */
+
+  for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
+    ReRhor[BN_AB] = ReTmp[BN_AB];
+    ImRhor[BN_AB] = ImTmp[BN_AB];
+  }
+
   /****************************************************
     freeing of arrays:
   ****************************************************/
 
   fftw_free(in);
   fftw_free(out);
+
+  free(ReTmp);
+  free(ImTmp);
 
   /* PrintMemory */
 
@@ -537,6 +572,7 @@ void Inverse_FFT_Poisson(double *ReRhor, double *ImRhor,
 {
   int i,BN_AB,BN_CB,BN_CA,gp,NN_S,NN_R;
   double *array0,*array1;
+  double *ReTmp,*ImTmp; 
   int numprocs,myid,tag=999,ID,IDS,IDR;
   double Stime_proc, Etime_proc;
   MPI_Status stat;
@@ -562,6 +598,16 @@ void Inverse_FFT_Poisson(double *ReRhor, double *ImRhor,
 
   in  = fftw_malloc(sizeof(fftw_complex)*List_YOUSO[17]); 
   out = fftw_malloc(sizeof(fftw_complex)*List_YOUSO[17]); 
+
+  ReTmp = (double*)malloc(sizeof(double)*My_NumGridB_CB);
+  ImTmp = (double*)malloc(sizeof(double)*My_NumGridB_CB);
+
+  /* store ReRhok and ImRhok */
+
+  for (BN_CB=0; BN_CB<My_NumGridB_CB; BN_CB++){
+    ReTmp[BN_CB] = ReRhok[BN_CB];
+    ImTmp[BN_CB] = ImRhok[BN_CB];
+  }
 
   /*------------------ Inverse FFT along the A-axis in the CB partition ------------------*/
 
@@ -842,12 +888,22 @@ void Inverse_FFT_Poisson(double *ReRhor, double *ImRhor,
     printf("myid=%2d  Time Inverse FFT-C  = %15.12f\n",myid,Etime_proc-Stime_proc);
   }
 
+  /* back to ReRhok and ImRhok */
+
+  for (BN_CB=0; BN_CB<My_NumGridB_CB; BN_CB++){
+    ReRhok[BN_CB] = ReTmp[BN_CB];
+    ImRhok[BN_CB] = ImTmp[BN_CB];
+  }
+
   /****************************************************
     freeing of arrays:
 
     fftw_complex  in[List_YOUSO[17]];
     fftw_complex out[List_YOUSO[17]];
   ****************************************************/
+
+  free(ReTmp);
+  free(ImTmp);
 
   fftw_free(in);
   fftw_free(out);
@@ -966,6 +1022,32 @@ double FFT_Density(int den_flag,
 
     break;
 
+    case 9:
+
+      for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
+        ReRhor[BN_AB] = Density_Grid_B[0][BN_AB] + PCCDensity_Grid_B[0][BN_AB];
+        ImRhor[BN_AB] = 0.0;
+      }
+
+    break;
+
+    case 10:
+
+      for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
+        ReRhor[BN_AB] = Density_Grid_B[1][BN_AB] + PCCDensity_Grid_B[1][BN_AB];
+        ImRhor[BN_AB] = 0.0;
+      }
+
+    break;
+
+    case 11:
+
+      for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
+        ReRhor[BN_AB] = Density_Grid_B[0][BN_AB] + Density_Grid_B[1][BN_AB] + 2.0*PCCDensity_Grid_B[0][BN_AB];
+        ImRhor[BN_AB] = 0.0;
+      }
+
+    break;
   }
 
   /* FFT of Density */

@@ -280,6 +280,39 @@ void Set_XC_Grid(int SCF_iter, int XC_P_switch, int XC_switch,
     } /* #pragma omp parallel */
   } /* if (XC_switch==4) */ 
 
+  /*
+  {
+ 
+    int DN,BN_AB,BN;
+
+  Ng1 = Max_Grid_Index_D[1] - Min_Grid_Index_D[1] + 1;
+  Ng2 = Max_Grid_Index_D[2] - Min_Grid_Index_D[2] + 1;
+  Ng3 = Max_Grid_Index_D[3] - Min_Grid_Index_D[3] + 1;
+
+  for (n=0; n<Num_Rcv_Grid_B2D[myid]; n++){
+    DN = Index_Rcv_Grid_B2D[myid][n];
+    BN = Index_Snd_Grid_B2D[myid][n];
+
+    i = DN/(Ng2*Ng3);
+    j = (DN-i*Ng2*Ng3)/Ng3;
+    k = DN - i*Ng2*Ng3 - j*Ng3; 
+
+    if ( !(i<=1 || (Ng1-2)<=i || j<=1 || (Ng2-2)<=j || k<=1 || (Ng3-2)<=k)){
+      Den0[BN] = dDen_Grid[0][0][DN];
+    }
+  }
+
+  for (BN_AB=0; BN_AB<My_NumGridB_AB; BN_AB++){
+    printf("BN_AB=%2d %15.12f\n",BN_AB,Den0[BN_AB]);  
+  }
+
+  }
+
+  printf("ABC2\n");fflush(stdout);
+  MPI_Finalize();
+  exit(0);
+  */
+
   /****************************************************
    loop MN
   ****************************************************/

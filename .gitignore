@@ -6,14 +6,14 @@
 /source3.8.5_sx/
 /source3.9.6_org/
 /source3.9.6_sx/*
-!/source3.9.6_sx/elpa-2018.05.001
-/source3.9.6_sx/elpa-2018.05.001/*
+#!/source3.9.6_sx/elpa-2018.05.001     accepted by official patch 3.9.6
+#/source3.9.6_sx/elpa-2018.05.001/*    accepted by official patch 3.9.6
 
 #white list
 !/source3.9.6_sx/readme*
 !/source3.9.6_sx/Band_DFT_Col.c
-!/source3.9.6_sx/Band_DFT_NonCol.c
-!/source3.9.6_sx/Cluster_DFT_NonCol.c
+#!/source3.9.6_sx/Band_DFT_NonCol.c     accepted by official patch 3.9.6
+#!/source3.9.6_sx/Cluster_DFT_NonCol.c  accepted by official patch 3.9.6
 !/source3.9.6_sx/FT_PAO.c
 !/source3.9.6_sx/Force.c
 !/source3.9.6_sx/Gaunt.h
@@ -38,7 +38,7 @@
 !/source3.9.6_sx/openmx.c
 !/source3.9.6_sx/openmx_common.c
 !/source3.9.6_sx/truncation.c
-!/source3.9.6_sx/elpa-2018.05.001/elpa1_merge_systems_real_template.F90
+#!/source3.9.6_sx/elpa-2018.05.001/elpa1_merge_systems_real_template.F90   accepted by official patch 3.9.6
 
 
 

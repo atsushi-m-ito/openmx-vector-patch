@@ -1506,7 +1506,7 @@ double Force(double *****H0,
     Fz[Mc_AN] = 0.0;
   }
 
-#pragma omp parallel shared(time_per_atom,Fx,Fy,Fz,CntOLP,OLP,Cnt_switch,EDM,SpinP_switch,Spe_Total_CNO,natn,FNAN,WhatSpecies,M2G,Matomnum) private(OMPID,Nthrds,Nprocs,Mc_AN,Stime_atom,Etime_atom,Gc_AN,Cwan,h_AN,Gh_AN,Hwan,i,j,dum,dx,dy,dz)
+#pragma omp parallel shared(Dis,time_per_atom,Fx,Fy,Fz,CntOLP,OLP,Cnt_switch,EDM,SpinP_switch,Spe_Total_CNO,natn,FNAN,WhatSpecies,M2G,Matomnum) private(OMPID,Nthrds,Nprocs,Mc_AN,Stime_atom,Etime_atom,Gc_AN,Cwan,h_AN,Gh_AN,Hwan,i,j,dum,dx,dy,dz)
   {
 
     /* get info. on OpenMP */ 
@@ -2166,6 +2166,9 @@ double Force(double *****H0,
 
 
 
+/* OMP by A. Ito */
+   
+#ifndef f3omp
 void Force3()
 {
 	/****************************************************
@@ -3396,9 +3399,9 @@ sumz = 0.0;
 	if (2 <= level_stdout) {
 printf("<Force>  force(3) myid=%2d  Mc_AN=%2d Gc_AN=%2d  %15.12f %15.12f %15.12f\n",
 	myid, Mc_AN, Gc_AN, sumx*GridVol, sumy*GridVol, sumz*GridVol); fflush(stdout);
-
+/*
 printf("<Force>  force(3) myid=%2d  GridN_Atom[Gc_AN] = %d, FNAN[Gc_AN] = %d\n", myid, GridN_Atom[Gc_AN], FNAN[Gc_AN]);
-
+*/
 	}
 
 
@@ -3430,6 +3433,390 @@ Get_dOrbitals_free(work_dObs);
 	free(Vpot_grid[0]);
 	free(Vpot_grid);
 }
+
+/* OMP by Ozaki */
+
+#else
+void Force3()
+{
+  /****************************************************
+                      #3 of Force
+
+               dn/dx * (VNA + dVH + Vxc)
+           or
+               dn/dx * (dVH + Vxc)
+  ****************************************************/
+
+  int Mc_AN,Gc_AN,Cwan,Hwan,NO0,NO1;
+  int i,j,k,Nc,Nh,GNc,GRc,MNc,GNh,GRh;
+  int h_AN,Gh_AN,Mh_AN,Rnh,spin,Nog;
+  double ***dDen_Grid;
+  double sum,tmp0,r,dx,dy,dz;
+  double sumx,sumy,sumz;
+  double x,y,z,x1,y1,z1,Vpt;
+  double Cxyz[4];
+  double **dorbs0,*orbs1,***dChi0;
+  double ReVpt11,ReVpt22,ReVpt21,ImVpt21;
+  int numprocs,myid,tag=999,ID,IDS,IDR;
+  /* for OpenMP */
+  int OMPID,Nthrds,Nprocs;
+
+  /* MPI */
+  MPI_Comm_size(mpi_comm_level1,&numprocs);
+  MPI_Comm_rank(mpi_comm_level1,&myid);
+
+  /**********************************************************
+              main loop for calculation of force #3
+  **********************************************************/
+
+#pragma omp parallel shared(Orbs_Grid_FNAN,G2ID,myid,level_stdout,GridVol,F_VEF_flag,VEF_Grid,F_VNA_flag,VNA_Grid,F_Vxc_flag,Vxc_Grid,dVHart_Grid,F_dVHart_flag,ProExpn_VNA,E_Field_switch,DM,Orbs_Grid,GListTAtoms2,GListTAtoms1,NumOLG,ncn,F_G2M,natn,FNAN,Max_GridN_Atom,SpinP_switch,List_YOUSO,Cnt_switch,Gxyz,atv,MGridListAtom,CellListAtom,GridListAtom,GridN_Atom,Spe_Total_CNO,WhatSpecies,M2G,Matomnum) private(OMPID,Nthrds,Nprocs,Mc_AN,Gc_AN,Cwan,NO0,Nc,GNc,GRc,MNc,Cxyz,x,y,z,dx,dy,dz,dorbs0,orbs1,dDen_Grid,dChi0,i,k,h_AN,Gh_AN,Mh_AN,Rnh,Hwan,NO1,spin,Nog,Nh,j,sum,tmp0,sumx,sumy,sumz,Vpt,ReVpt11,ReVpt22,ReVpt21,ImVpt21)
+  {
+
+    /* allocation of arrays */
+   
+    dorbs0 = (double**)malloc(sizeof(double*)*4);
+    for (i=0; i<4; i++){
+      dorbs0[i] = (double*)malloc(sizeof(double)*List_YOUSO[7]);
+    }
+
+    orbs1 = (double*)malloc(sizeof(double)*List_YOUSO[7]);
+
+    dDen_Grid = (double***)malloc(sizeof(double**)*(SpinP_switch+1)); 
+    for (i=0; i<(SpinP_switch+1); i++){
+      dDen_Grid[i] = (double**)malloc(sizeof(double*)*3); 
+      for (k=0; k<3; k++){
+	dDen_Grid[i][k] = (double*)malloc(sizeof(double)*Max_GridN_Atom); 
+      }
+    }
+
+    dChi0 = (double***)malloc(sizeof(double**)*3); 
+    for (k=0; k<3; k++){
+      dChi0[k] = (double**)malloc(sizeof(double*)*List_YOUSO[7]); 
+      for (i=0; i<List_YOUSO[7]; i++){
+	dChi0[k][i] = (double*)malloc(sizeof(double)*Max_GridN_Atom); 
+      }
+    }
+
+    /* get info. on OpenMP */ 
+
+    OMPID = omp_get_thread_num();
+    Nthrds = omp_get_num_threads();
+    Nprocs = omp_get_num_procs();
+
+    for (Mc_AN=(OMPID*Matomnum/Nthrds+1); Mc_AN<((OMPID+1)*Matomnum/Nthrds+1); Mc_AN++){
+    
+      Gc_AN = M2G[Mc_AN];
+      Cwan = WhatSpecies[Gc_AN];
+      NO0 = Spe_Total_CNO[Cwan];
+
+      /***********************************
+               calc dOrb0
+      ***********************************/
+
+      for (Nc=0; Nc<GridN_Atom[Gc_AN]; Nc++){
+
+	GNc = GridListAtom[Mc_AN][Nc]; 
+	GRc = CellListAtom[Mc_AN][Nc];
+	MNc = MGridListAtom[Mc_AN][Nc];
+
+	Get_Grid_XYZ(GNc,Cxyz);
+	x = Cxyz[1] + atv[GRc][1];
+	y = Cxyz[2] + atv[GRc][2];
+	z = Cxyz[3] + atv[GRc][3];
+	dx = x - Gxyz[Gc_AN][1];
+	dy = y - Gxyz[Gc_AN][2];
+	dz = z - Gxyz[Gc_AN][3];
+
+	if (Cnt_switch==0)
+	  Get_dOrbitals(Cwan,dx,dy,dz,dorbs0);
+	else
+	  Get_Cnt_dOrbitals(Mc_AN,dx,dy,dz,dorbs0);
+
+	for (k=0; k<3; k++){
+	  for (i=0; i<NO0; i++){
+	    dChi0[k][i][Nc] = dorbs0[k+1][i];
+	  }
+	}
+      }
+
+      /***********************************
+              calc dDen_Grid
+      ***********************************/
+
+      /* initialize */
+      for (i=0; i<=SpinP_switch; i++){
+	for (k=0; k<3; k++){
+	  for (Nc=0; Nc<GridN_Atom[Gc_AN]; Nc++){
+	    dDen_Grid[i][k][Nc] = 0.0;
+	  }
+	}
+      }
+
+      for (h_AN=0; h_AN<=FNAN[Gc_AN]; h_AN++){
+
+	Gh_AN = natn[Gc_AN][h_AN];
+	Mh_AN = F_G2M[Gh_AN];
+	Rnh = ncn[Gc_AN][h_AN];
+	Hwan = WhatSpecies[Gh_AN];
+	NO1 = Spe_Total_CNO[Hwan];
+
+	for (spin=0; spin<=SpinP_switch; spin++){
+	  for (Nog=0; Nog<NumOLG[Mc_AN][h_AN]; Nog++){
+
+	    Nc = GListTAtoms1[Mc_AN][h_AN][Nog];
+	    Nh = GListTAtoms2[Mc_AN][h_AN][Nog];
+
+	    for (k=0; k<3; k++){
+	      for (i=0; i<NO0; i++){
+		dorbs0[k][i] = dChi0[k][i][Nc];      
+	      }
+	    }   
+
+	    /* set orbs1 */
+
+            if (G2ID[Gh_AN]==myid){
+  	      for (j=0; j<NO1; j++) orbs1[j] = Orbs_Grid[Mh_AN][Nh][j];/* AITUNE */
+	    }
+            else{
+  	      for (j=0; j<NO1; j++) orbs1[j] = Orbs_Grid_FNAN[Mc_AN][h_AN][Nog][j];/* AITUNE */
+            } 
+
+	    for (k=0; k<3; k++){
+	      sum = 0.0;
+	      for (i=0; i<NO0; i++){
+		tmp0 = 0.0;
+		for (j=0; j<NO1; j++){
+		  tmp0 += orbs1[j]*DM[0][spin][Mc_AN][h_AN][i][j];
+		}
+		sum += dorbs0[k][i]*tmp0;
+	      }
+
+	      /* due to difference in the definition between density matrix and density */
+	      if (spin==3)
+		dDen_Grid[spin][k][Nc] -= sum;
+	      else
+		dDen_Grid[spin][k][Nc] += sum;
+
+	    }
+	  }
+	}
+      }
+
+      /***********************************
+               calc force #3
+      ***********************************/
+
+      /* spin collinear */
+
+      if (SpinP_switch==0 || SpinP_switch==1){
+
+	sumx = 0.0;
+	sumy = 0.0;
+	sumz = 0.0;
+
+	for (spin=0; spin<=SpinP_switch; spin++){ 
+	  for (Nc=0; Nc<GridN_Atom[Gc_AN]; Nc++){
+  
+	    MNc = MGridListAtom[Mc_AN][Nc];
+
+	    if (0<=MNc){
+	      if ( E_Field_switch==1 ){
+
+		if (ProExpn_VNA==0){
+
+		  Vpt = F_dVHart_flag*dVHart_Grid[MNc]
+                      + F_Vxc_flag*Vxc_Grid[spin][MNc]
+                      + F_VNA_flag*VNA_Grid[MNc]
+                      + F_VEF_flag*VEF_Grid[MNc];
+
+		}
+		else{
+
+		  Vpt = F_dVHart_flag*dVHart_Grid[MNc]
+                      + F_Vxc_flag*Vxc_Grid[spin][MNc]
+                      + F_VEF_flag*VEF_Grid[MNc];
+
+		}
+
+	      }
+	      else{ 
+		if (ProExpn_VNA==0){
+
+		  Vpt = F_dVHart_flag*dVHart_Grid[MNc]
+                      + F_Vxc_flag*Vxc_Grid[spin][MNc]
+                      + F_VNA_flag*VNA_Grid[MNc];
+
+		}
+		else{
+
+		  Vpt = F_dVHart_flag*dVHart_Grid[MNc]
+                      + F_Vxc_flag*Vxc_Grid[spin][MNc];
+
+		}
+	      }
+	    }
+	    else 
+	      Vpt = 0.0;
+
+	    sumx += dDen_Grid[spin][0][Nc]*Vpt;
+	    sumy += dDen_Grid[spin][1][Nc]*Vpt;
+	    sumz += dDen_Grid[spin][2][Nc]*Vpt;
+
+	  }
+	}
+
+	if (SpinP_switch==0){
+	  sumx = 4.0*sumx;
+	  sumy = 4.0*sumy;
+	  sumz = 4.0*sumz;
+	}
+	else if (SpinP_switch==1){
+	  sumx = 2.0*sumx;
+	  sumy = 2.0*sumy;
+	  sumz = 2.0*sumz;
+	}
+      }
+
+      /* spin non-collinear */
+
+      else if (SpinP_switch==3){
+
+	sumx = 0.0;
+	sumy = 0.0;
+	sumz = 0.0;
+
+	for (Nc=0; Nc<GridN_Atom[Gc_AN]; Nc++){
+  
+	  MNc = MGridListAtom[Mc_AN][Nc];
+
+	  if (0<=MNc){
+	    if ( E_Field_switch==1 ){
+
+	      if (ProExpn_VNA==0){
+
+		ReVpt11 = F_dVHart_flag*dVHart_Grid[MNc]
+		        + F_Vxc_flag*Vxc_Grid[0][MNc]
+		        + F_VNA_flag*VNA_Grid[MNc]
+		        + F_VEF_flag*VEF_Grid[MNc];
+
+		ReVpt22 = F_dVHart_flag*dVHart_Grid[MNc]
+  		        + F_Vxc_flag*Vxc_Grid[1][MNc]
+		        + F_VNA_flag*VNA_Grid[MNc]
+		        + F_VEF_flag*VEF_Grid[MNc];
+
+		ReVpt21 =  F_Vxc_flag*Vxc_Grid[2][MNc];
+		ImVpt21 = -F_Vxc_flag*Vxc_Grid[3][MNc];
+	      }
+	      else{
+
+		ReVpt11 = F_dVHart_flag*dVHart_Grid[MNc]
+	 	        + F_Vxc_flag*Vxc_Grid[0][MNc]
+		        + F_VEF_flag*VEF_Grid[MNc];
+
+		ReVpt22 = F_dVHart_flag*dVHart_Grid[MNc]
+		        + F_Vxc_flag*Vxc_Grid[1][MNc]
+		        + F_VEF_flag*VEF_Grid[MNc];
+
+		ReVpt21 =  F_Vxc_flag*Vxc_Grid[2][MNc];
+		ImVpt21 = -F_Vxc_flag*Vxc_Grid[3][MNc];
+	      } 
+
+	    }
+	    else{ 
+
+	      if (ProExpn_VNA==0){
+
+		ReVpt11 = F_dVHart_flag*dVHart_Grid[MNc]
+		        + F_Vxc_flag*Vxc_Grid[0][MNc]
+		        + F_VNA_flag*VNA_Grid[MNc];
+
+		ReVpt22 = F_dVHart_flag*dVHart_Grid[MNc]
+		        + F_Vxc_flag*Vxc_Grid[1][MNc]
+		        + F_VNA_flag*VNA_Grid[MNc];
+
+		ReVpt21 =  F_Vxc_flag*Vxc_Grid[2][MNc];
+		ImVpt21 = -F_Vxc_flag*Vxc_Grid[3][MNc];
+	      }
+	      else{
+
+		ReVpt11 = F_dVHart_flag*dVHart_Grid[MNc] + F_Vxc_flag*Vxc_Grid[0][MNc];
+		ReVpt22 = F_dVHart_flag*dVHart_Grid[MNc] + F_Vxc_flag*Vxc_Grid[1][MNc];
+
+		ReVpt21 =  F_Vxc_flag*Vxc_Grid[2][MNc];
+		ImVpt21 = -F_Vxc_flag*Vxc_Grid[3][MNc];
+	      }
+
+	    }
+	  }
+	  else{ 
+	    ReVpt11 = 0.0;
+	    ReVpt22 = 0.0;
+	    ReVpt21 = 0.0;
+	    ImVpt21 = 0.0;
+	  }
+
+	  sumx +=      dDen_Grid[0][0][Nc]*ReVpt11;
+	  sumx +=      dDen_Grid[1][0][Nc]*ReVpt22;
+	  sumx +=  2.0*dDen_Grid[2][0][Nc]*ReVpt21;
+	  sumx += -2.0*dDen_Grid[3][0][Nc]*ImVpt21;
+
+	  sumy +=      dDen_Grid[0][1][Nc]*ReVpt11;
+	  sumy +=      dDen_Grid[1][1][Nc]*ReVpt22;
+	  sumy +=  2.0*dDen_Grid[2][1][Nc]*ReVpt21;
+	  sumy += -2.0*dDen_Grid[3][1][Nc]*ImVpt21;
+
+	  sumz +=      dDen_Grid[0][2][Nc]*ReVpt11;
+	  sumz +=      dDen_Grid[1][2][Nc]*ReVpt22;
+	  sumz +=  2.0*dDen_Grid[2][2][Nc]*ReVpt21;
+	  sumz += -2.0*dDen_Grid[3][2][Nc]*ImVpt21;
+
+	}
+
+	sumx = 2.0*sumx;
+	sumy = 2.0*sumy;
+	sumz = 2.0*sumz;
+
+      }
+
+      Gxyz[Gc_AN][17] += sumx*GridVol;
+      Gxyz[Gc_AN][18] += sumy*GridVol;
+      Gxyz[Gc_AN][19] += sumz*GridVol;
+
+      if (2<=level_stdout){
+	printf("<Force>  force(3) myid=%2d  Mc_AN=%2d Gc_AN=%2d  %15.12f %15.12f %15.12f\n",
+	       myid,Mc_AN,Gc_AN,sumx*GridVol,sumy*GridVol,sumz*GridVol);fflush(stdout);
+      }
+
+    } /* Mc_AN */
+
+    /* freeing of arrays */
+
+    for (k=0; k<3; k++){
+      for (i=0; i<List_YOUSO[7]; i++){
+	free(dChi0[k][i]);
+      }
+      free(dChi0[k]);
+    }
+    free(dChi0);
+
+    for (i=0; i<(SpinP_switch+1); i++){
+      for (k=0; k<3; k++){
+	free(dDen_Grid[i][k]);
+      }
+      free(dDen_Grid[i]);
+    }
+    free(dDen_Grid);
+
+    free(orbs1);
+
+    for (i=0; i<4; i++){
+      free(dorbs0[i]);
+    }
+    free(dorbs0);
+
+  } /* #pragma omp parallel */
+}
+#endif
 
 
 

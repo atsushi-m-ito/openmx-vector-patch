@@ -19,6 +19,14 @@
 #include "mpi.h"
 #include <omp.h>
 
+#ifdef _NEC
+#include <ftrace.h>
+#else
+//dummy macro
+#define ftrace_region_begin(x)   
+#define ftrace_region_end(x)   
+#endif
+
 #ifdef kcomp
 dcomplex****** Allocate6D_dcomplex(int size_1, int size_2, int size_3, 
                                           int size_4, int size_5, int size_6);
@@ -45,6 +53,10 @@ void Free4D_dcomplex(dcomplex**** buffer);
 void Free2D_dcomplex(dcomplex** buffer);
 #endif
 
+#ifdef _NEC
+#include "Gaunt.h"
+#define _NEC_OLP_MG
+#endif
 
 
 dcomplex Conjg_inline(dcomplex z)
@@ -55,7 +67,7 @@ dcomplex Conjg_inline(dcomplex z)
   return c;
 }
 
-inline dcomplex Complex_inline(double re, double im)
+dcomplex Complex_inline(double re, double im)
 {
   dcomplex c;
   c.r = re;
@@ -63,7 +75,7 @@ inline dcomplex Complex_inline(double re, double im)
   return c;
 }
 
-inline dcomplex Cadd_inline(dcomplex a, dcomplex b)
+dcomplex Cadd_inline(dcomplex a, dcomplex b)
 {
   dcomplex c;
   c.r = a.r + b.r;
@@ -71,7 +83,7 @@ inline dcomplex Cadd_inline(dcomplex a, dcomplex b)
   return c;
 }
 
-inline dcomplex Csub_inline(dcomplex a, dcomplex b)
+dcomplex Csub_inline(dcomplex a, dcomplex b)
 {
   dcomplex c;
   c.r = a.r - b.r;
@@ -79,7 +91,7 @@ inline dcomplex Csub_inline(dcomplex a, dcomplex b)
   return c;
 }
 
-inline dcomplex Cmul_inline(dcomplex a, dcomplex b)
+dcomplex Cmul_inline(dcomplex a, dcomplex b)
 {
   dcomplex c;
   c.r = a.r*b.r - a.i*b.i;
@@ -164,6 +176,22 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
     }
   }
 
+#ifdef _NEC
+ftrace_region_begin("OLP_MG1");
+
+  int max_L0 = 0;
+  for (int spe=0; spe<SpeciesNum; spe++){
+    if(max_L0 < Spe_MaxL_Basis[spe]) max_L0 = Spe_MaxL_Basis[spe];
+  }
+  const int ai_L0_LIMIT = max_L0 + 1;
+  const int ai_L0_LIMIT_SQ = ai_L0_LIMIT * ai_L0_LIMIT;
+  const int ai_L1_LIMIT = ai_L0_LIMIT;
+  const int ai_L1_LIMIT_SQ = ai_L1_LIMIT*ai_L1_LIMIT;
+  const int ai_LL_LIMIT = max_L0*2+1;
+  const int ai_LL_LIMIT_SQ = ai_LL_LIMIT*ai_LL_LIMIT;
+  double* Gaunt_list = MakeGaunt(ai_L0_LIMIT_SQ, ai_L1_LIMIT_SQ, ai_LL_LIMIT_SQ);
+ftrace_region_end("OLP_MG1");
+#endif
 
   /* OpenMP */
 
@@ -257,7 +285,7 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
     CmatKp = Allocate2D_dcomplex((2*(List_YOUSO[25]+1)+1), (2*(List_YOUSO[25]+1)+1));
  */
 //AITUNE//
-    double** ai_Gaunt = Allocate2D_double((List_YOUSO[25]+1) *(2*(List_YOUSO[25]+1)+1), (List_YOUSO[25]+1) *(2*(List_YOUSO[25]+1)+1));
+    //not used// double** ai_Gaunt = Allocate2D_double((List_YOUSO[25]+1) *(2*(List_YOUSO[25]+1)+1), (List_YOUSO[25]+1) *(2*(List_YOUSO[25]+1)+1));
 
     double* tmp_SphB_D  = (double*)malloc(sizeof(double)*(2*(List_YOUSO[25]+1)+1)*(OneD_Grid+1));
     double* tmp_SphBp_D = (double*)malloc(sizeof(double)*(2*(List_YOUSO[25]+1)+1)*(OneD_Grid+1));
@@ -333,7 +361,7 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
       int* ai_vec_num1;
       int ai_max_LMul0, ai_max_LMul1;
       const int ai_len_vec_LM0 = Spe_Total_NO[Cwan];
-      const int ai_len_vec_LM1 = Spe_Total_NO[Hwan];;
+      const int ai_len_vec_LM1 = Spe_Total_NO[Hwan];
       {
         ai_max_LMul0 = 0;
         
@@ -560,6 +588,7 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
                 \int RL(k)*RL'(k)*jl(k*R) k^4 dk^3,
         ****************************************************/
 
+ftrace_region_begin("OLP_Kin_4.5");
         for(int m=-l; m<=l; m++){ 
 
           ComplexSH(l,m,theta,phi,SH,dSHt,dSHp);
@@ -590,9 +619,17 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
                 const dcomplex CYt1 = Cmul_inline(Cpow,CYt);
                 const dcomplex CYp1 = Cmul_inline(Cpow,CYp);
 
-//#pragma _NEC noinner
+/*
+#ifdef _NEC
+#pragma _NEC loop_count(7)
 #pragma _NEC unroll(7)
+                for (int L0M0=0; L0M0<=6; L0M0++){//for (M0=-L0; M0<=L0; M0++){
+                  if(L0M0<=2*L0){
+#else
+*/
                 for (int L0M0=0; L0M0<=2*L0; L0M0++){//for (M0=-L0; M0<=L0; M0++){
+                  
+/*#endif*/
                   const int M0 = L0M0 - L0;
 
                   const int M1 = M0 - m;
@@ -600,9 +637,11 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
 
                   
                   if (abs(M1)<=L1){
-
+#ifdef _NEC_OLP_MG
+                    gant = GetGaunt(L0,M0,L1,M1,l,m,Gaunt_list, ai_L1_LIMIT_SQ, ai_LL_LIMIT_SQ);
+#else
                     gant = Gaunt(L0,M0,L1,M1,l,m);
-
+#endif
                     /* S */ 
 
                     tmp0 = gant*SumS0[LMul0][LMul1];
@@ -660,11 +699,16 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
                       Cadd_inline(TmpKinp[num0+L0M0][num1+L1M1],Ctmp2);
 
 		              }
+/*#ifdef _NEC                  
+                  }
+#endif                  */
 		            }
 		          }
 	  	      }
           }
         } /* m */
+        
+ftrace_region_end("OLP_Kin_4.5");
       } /* l */
 
       /* free SphB and SphBp */
@@ -1056,7 +1100,7 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
     Free2D_dcomplex(CmatKp);
 */
     //AITUNE//
-    Free2D_double(ai_Gaunt);
+    //not used//Free2D_double(ai_Gaunt);
 	
   } /* #pragma omp parallel */
   
@@ -1066,6 +1110,7 @@ double Set_OLP_Kin(double *****OLP, double *****H0)
 
   free(OneD2h_AN);
   free(OneD2Mc_AN);
+  free(Gaunt_list);
 
   /* for time */
   dtime(&TEtime);

@@ -1071,78 +1071,6 @@ double truncation(int MD_iter,int UCell_flag)
     }
   }
 
-  /*** added by Ohwaki ***/
-
-  /* OLP_p */
-
-  if (0<=CLE_Type){
-
-    OLP_p = (double*****)malloc(sizeof(double****)*4);
-    size_OLP_p = 0;
-    for (k=0; k<4; k++){
-      OLP_p[k] = (double****)malloc(sizeof(double***)*(Matomnum+MatomnumF+MatomnumS+2)); 
-      FNAN[0] = 0;
-      for (Mc_AN=0; Mc_AN<(Matomnum+MatomnumF+MatomnumS+2); Mc_AN++){
-
-	if (Mc_AN==0){
-	  Gc_AN = 0;
-	  tno0 = 1;
-	  fan = FNAN[Gc_AN]; 
-	}
-	else if (Mc_AN==(Matomnum+1)){
-	  tno0 = List_YOUSO[7];
-	  fan = List_YOUSO[8];
-	}
-	else if ( Mc_AN<=(Matomnum+MatomnumF+MatomnumS) ){
-
-	  Gc_AN = S_M2G[Mc_AN];
-	  Cwan = WhatSpecies[Gc_AN];
-	  tno0 = Spe_Total_NO[Cwan];  
-	  fan = FNAN[Gc_AN]; 
-	}    
-	else {
-	  tno0 = List_YOUSO[7];
-	  fan = List_YOUSO[8];
-	}
-
-	OLP_p[k][Mc_AN] = (double***)malloc(sizeof(double**)*(fan+1)); 
-	for (h_AN=0; h_AN<=fan; h_AN++){
-
-	  if (Mc_AN==0){
-	    tno1 = 1;  
-	  }
-	  else if (Mc_AN==(Matomnum+1)){
-	    tno1 = List_YOUSO[7];
-	  }
-	  else if ( (Hub_U_switch==0 || Hub_U_occupation!=1 || core_hole_state_flag!=1) 
-		    && 0<k 
-		    && (Matomnum+1)<Mc_AN
-		    && Mc_AN<=(Matomnum+MatomnumF+MatomnumS)){
-
-	    tno1 = 1;
-	  }
-	  else if ( Mc_AN<=(Matomnum+MatomnumF+MatomnumS) ){
-
-	    Gh_AN = natn[Gc_AN][h_AN];
-	    Hwan = WhatSpecies[Gh_AN];
-	    tno1 = Spe_Total_NO[Hwan];
-	  }
-	  else{
-	    tno1 = List_YOUSO[7];
-	  } 
-
-	  OLP_p[k][Mc_AN][h_AN] = (double**)malloc(sizeof(double*)*tno0); 
-	  for (i=0; i<tno0; i++){
-	    OLP_p[k][Mc_AN][h_AN][i] = (double*)malloc(sizeof(double)*tno1); 
-	    size_OLP_p += tno1;
-	  }
-	}
-      }
-    }
-  }
-
-  /*** added by Ohwaki (end) ***/
-
   /* OLP_CH */  
 
   if (core_hole_state_flag==1){
@@ -1392,7 +1320,7 @@ double truncation(int MD_iter,int UCell_flag)
       }
     }
   }
- 
+
   /* CntDS_NL */  
 
   size_CntDS_NL = 0;
@@ -2891,9 +2819,6 @@ double truncation(int MD_iter,int UCell_flag)
   PrintMemory("truncation: CntH0",   sizeof(double)*size_CntH0,   NULL);
   PrintMemory("truncation: HNL",     sizeof(double)*size_HNL,     NULL);
   PrintMemory("truncation: OLP",     sizeof(double)*size_OLP,     NULL);
-  if (0<=CLE_Type){
-  PrintMemory("truncation: OLP_p",   sizeof(double)*size_OLP_p,     NULL);
-  }
   if (core_hole_state_flag==1){
   PrintMemory("truncation: OLP_CH",  sizeof(double)*size_OLP_CH,     NULL);
   }
@@ -3478,6 +3403,26 @@ void Trn_System(int MD_iter, int CpyCell, int TCpyCell)
 
   } /* #pragma omp parallel */
 
+  /*
+  for (ct_AN=1; ct_AN<=atomnum; ct_AN++){
+
+    if (WhatSpecies[ct_AN]==0) rcutA = 0.48/BohrR;
+    else if (WhatSpecies[ct_AN]==1) rcutA = 1.0/BohrR;
+
+    for (i=1; i<=FNAN[ct_AN]; i++){
+   
+      if (WhatSpecies[natn[ct_AN][i]]==0) rcutB = 0.48/BohrR;
+      else if (WhatSpecies[natn[ct_AN][i]]==1) rcutB = 1.0/BohrR;
+
+      if ( Dis[ct_AN][i]<(rcutA+rcutB)){
+        printf("ABC1 ct_AN=%2d natn=%2d i=%2d Dis=%18.15f %18.15f %18.15f\n",
+	       ct_AN,natn[ct_AN][i],i,Dis[ct_AN][i]*BohrR,
+               (rcutA+rcutB)*BohrR,(rcutA+rcutB-Dis[ct_AN][i])*BohrR);
+      }
+    }
+  }
+  */
+
   /**************************************************************
    if (orderN_FNAN_SNAN_flag==1)
 
@@ -3642,7 +3587,7 @@ void Estimate_Trn_System(int CpyCell, int TCpyCell)
   abnormal_bond = 0;
   my_abnormal_bond = 0;
 
-#pragma omp parallel shared(CpyCell,level_stdout,BCR,Spe_WhatAtom,atv,Gxyz,TCpyCell,SNAN,FNAN,Spe_Atom_Cut1,WhatSpecies,M2G,Matomnum,atomnum) private(i,ct_AN,wanA,rcutA,j,wanB,rcutB,rcut,Rn,dx,dy,dz,r,spe1,spe2,OMPID,Nthrds,Nprocs,rcut_max)
+#pragma omp parallel shared(CpyCell,level_stdout,BCR,Spe_WhatAtom,atv,Gxyz,TCpyCell,SNAN,FNAN,Spe_Atom_Cut1,WhatSpecies,M2G,Matomnum,atomnum) private(i,ct_AN,wanA,rcutA,j,wanB,rcutB,rcut,Rn,dx,dy,dz,r,spe1,spe2,OMPID,Nthrds,Nprocs,rcut_max,my_abnormal_bond)
 
   {
     /* get info. on OpenMP */ 
@@ -3686,8 +3631,15 @@ void Estimate_Trn_System(int CpyCell, int TCpyCell)
 	      r = sqrt(dx*dx + dy*dy + dz*dz);
 	      if (r<=rcut)     FNAN[ct_AN]++;
 	      else if (r<=BCR) SNAN[ct_AN]++;
-	    }
 
+              
+	      if (r<0.4){
+                my_abnormal_bond = 1;
+
+		printf("warning: too short distance between %2d %2d (Rn=%2d): r=%15.12f\n",ct_AN,j,Rn,r);
+	      }
+
+	    }
 	  }
 	}
       } /* j */
@@ -4230,6 +4182,7 @@ void UCell_Box(int MD_iter, int estimate_switch, int CpyCell)
         if      (i==1) Ngrid1 = k;
         else if (i==2) Ngrid2 = k;
         else if (i==3) Ngrid3 = k;
+
       }
 
       /* adjust Ngrid for NEGF  */
@@ -4277,7 +4230,7 @@ void UCell_Box(int MD_iter, int estimate_switch, int CpyCell)
     B2 = rgtv[2][1]*rgtv[2][1] + rgtv[2][2]*rgtv[2][2] + rgtv[2][3]*rgtv[2][3];
     C2 = rgtv[3][1]*rgtv[3][1] + rgtv[3][2]*rgtv[3][2] + rgtv[3][3]*rgtv[3][3];
 
-    A2 = A2/4.0;  /* note: change the unit from Hatree to Rydberg by multiplying 1/2 */
+    A2 = A2/4.0;  /* note: change the unit from Hartree to Rydberg by multiplying 1/2 */
     B2 = B2/4.0;
     C2 = C2/4.0;
 
@@ -4497,6 +4450,7 @@ void UCell_Box(int MD_iter, int estimate_switch, int CpyCell)
 		 Cell_Gxyz[Gc_AN][2],
 		 Cell_Gxyz[Gc_AN][3]); 
 	}
+
       }
 
     } /* #pragma omp parallel */
@@ -5041,6 +4995,7 @@ void UCell_Box(int MD_iter, int estimate_switch, int CpyCell)
   
 	      Nog = -1;
 	      Nc = 0;
+
 #ifdef _NEC
   int *isSatisfied = (int*)malloc(sizeof(int)*GridN_Atom[Gh_AN]);
   int *GRH1 = (int*)malloc(sizeof(int)*GridN_Atom[Gh_AN]);
@@ -5062,20 +5017,22 @@ void UCell_Box(int MD_iter, int estimate_switch, int CpyCell)
 	           }
                 }
 #endif
+
 	      for (Nh=0; Nh<GridN_Atom[Gh_AN]; Nh++){
 
 		GNh = Tmp_GridListAtom[Mh_AN][Nh];
-		#ifndef _NEC
-                GRh = Tmp_CellListAtom[Mh_AN][Nh];
+#ifndef _NEC
+		GRh = Tmp_CellListAtom[Mh_AN][Nh];
 
-                ll1 = atv_ijk[GRh][1];
-                ll2 = atv_ijk[GRh][2];
-                ll3 = atv_ijk[GRh][3];
+		ll1 = atv_ijk[GRh][1];
+		ll2 = atv_ijk[GRh][2];
+		ll3 = atv_ijk[GRh][3];
 
-                lll1 = l1 + ll1;
-                lll2 = l2 + ll2;
-                lll3 = l3 + ll3;
-		#endif
+		lll1 = l1 + ll1;
+		lll2 = l2 + ll2;
+		lll3 = l3 + ll3;
+#endif
+
 		if (Tmp_GridListAtom[Mc_AN][0]<=GNh) {
 
 		  /* find the initial Nc */
@@ -5091,15 +5048,15 @@ void UCell_Box(int MD_iter, int estimate_switch, int CpyCell)
 		  }
 
 		  /*  find whether there is the overlapping or not. */
-		  #ifndef _NEC
-                  if (abs(lll1)<=CpyCell && abs(lll2)<=CpyCell && abs(lll3)<=CpyCell){
+#ifndef _NEC
+		  if (abs(lll1)<=CpyCell && abs(lll2)<=CpyCell && abs(lll3)<=CpyCell){
 
-                    GRh1 = R_atv(CpyCell,lll1,lll2,lll3);
-                  #else
+		    GRh1 = R_atv(CpyCell,lll1,lll2,lll3);
+#else
 		  if (isSatisfied[Nh]){
 
 		    GRh1 = GRH1[Nh];
-                  #endif
+#endif
 		    po = 0;
 
 		    while (po==0 && Nc<GridN_Atom[Gc_AN]) {
@@ -5941,51 +5898,6 @@ void free_arrays_truncation0()
       free(OLP[k]);
     }
     free(OLP);
-
-    /*** added by Ohwaki ***/
-
-    /* OLP_p */
-
-    if (0<=CLE_Type){
-
-      for (k=0; k<4; k++){
-	for (Mc_AN=0; Mc_AN<(Matomnum+MatomnumF+MatomnumS+2); Mc_AN++){
-
-	  if (Mc_AN==0){
-	    Gc_AN = 0;
-	    tno0 = 1;
-	    FNAN[0] = 0;
-	    fan = FNAN[Gc_AN]; 
-	  }
-	  else if (Mc_AN==(Matomnum+1)){
-	    tno0 = List_YOUSO[7];
-	    fan = List_YOUSO[8];
-	  }
-	  else if ( Mc_AN<=(Matomnum+MatomnumF+MatomnumS) ){
-	    Gc_AN = S_M2G[Mc_AN];
-	    Cwan = WhatSpecies[Gc_AN];
-	    tno0 = Spe_Total_NO[Cwan];  
-	    fan = FNAN[Gc_AN]; 
-	  }    
-	  else {
-	    tno0 = List_YOUSO[7];
-	    fan = List_YOUSO[8];
-	  }
-
-	  for (h_AN=0; h_AN<=fan; h_AN++){
-	    for (i=0; i<tno0; i++){
-	      free(OLP_p[k][Mc_AN][h_AN][i]);
-	    }
-	    free(OLP_p[k][Mc_AN][h_AN]);
-	  }
-	  free(OLP_p[k][Mc_AN]);
-	}
-	free(OLP_p[k]);
-      }
-      free(OLP_p);
-    }
-
-    /*** added by Ohwaki (end) ***/
 
     /* OLP_CH */
 
@@ -8478,7 +8390,7 @@ void Set_Inf_SndRcv()
       Pro_Snd_GAtom[ID1][Num_Pro_Snd[ID1]] = Gh_AN;
       Pro_Snd_MAtom[ID1][Num_Pro_Snd[ID1]] = Mc_AN;
       Pro_Snd_LAtom[ID1][Num_Pro_Snd[ID1]] = Lh_AN;
-      
+
       Num_Pro_Snd[ID1]++;
     }
   }
@@ -8517,7 +8429,7 @@ void Set_Inf_SndRcv()
          n1 = atv_ijk[Rn2][1];
          n2 = atv_ijk[Rn2][2];
          n3 = atv_ijk[Rn2][3];
-              
+
          if (m1==n1 && m2==n2 && m3==n3 &&  Gj_AN==Gc_AN){
            Pro_Snd_LAtom2[ID][i] = j;
 	   po = 1;
@@ -8525,7 +8437,17 @@ void Set_Inf_SndRcv()
 
          j++;
 
+         if (FNAN[Gh_AN]<j && po==0){
+           po = 2;            
+	 }
+
        } while (po==0);
+
+       if (po==2){
+         if (myid==Host_ID ) printf("Technical error in truncation.c: error code 10.\n");
+         MPI_Finalize();
+         exit(0); 
+       }
 
     }
   }

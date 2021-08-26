@@ -10,7 +10,7 @@
 
   Log of TRAN_Set_Electrode_Grid.c:
 
-     24/July/2008  Released by T.Ozaki
+     24/July/2008  Released by T. Ozaki
 
 ***********************************************************************/
 /* revised by Y. Xiao for Noncollinear NEGF calculations */
