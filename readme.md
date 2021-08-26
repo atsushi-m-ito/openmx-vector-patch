@@ -15,6 +15,7 @@ This patch for vector processors(VP) will be distributed according to the origin
 
 |Patch for VP ver.| Original OpenMX ver.|
 |---|---|
+| vec15 | 3.9.6 |
 | vec14 | 3.9.2 |
 | vec13 | 3.9.2 |
 | none  | 3.9.1 |
@@ -28,7 +29,7 @@ This section describes how to install the original OpenMX and how to apply this 
 
 ```
 $ ls 
-openmx3.9.tar.gz   patch3.9.2.tar.gz   openmx-vector-patch-vec13for3.9.2.tar.gz
+openmx3.9.tar.gz   patch3.9.6.tar.gz   openmx-vector-patch-vec15for3.9.6.tar.gz
 ```
 
 2. Expand the original OpenMX
@@ -43,17 +44,17 @@ DFT_DATA19   source   work
 3. Apply the original patch
 
 ```
-$ cp -rp source source392vec13
-$ cd source392vec13
-$ tar xvfz ../../patch3.9.2.tar.gz
+$ cp -rp source source396vec15
+$ cd source396vec15
+$ tar xvfz ../../patch3.9.6.tar.gz
 ```
 
 4. Apply the patch for VP
 
 ```
-$ tar xvfz ../../openmx-vector-patch-vec13for3.9.2.tar.gz
-$ cp -rp openmx-vector-patch-vec13for3.9.2/source3.9.2_sx/* ./
-$ rm -r openmx-vector-patch-vec13for3.9.2/
+$ tar xvfz ../../openmx-vector-patch-vec15for3.9.6.tar.gz
+$ cp -rp openmx-vector-patch-vec15for3.9.6/source3.9.6_sx/* ./
+$ rm -r openmx-vector-patch-vec15for3.9.6/
 ```
 
 5. Check and modify the makefile according to your environment. And, Make it.
