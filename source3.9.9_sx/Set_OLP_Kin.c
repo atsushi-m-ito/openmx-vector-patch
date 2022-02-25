@@ -19,7 +19,7 @@
 #include "mpi.h"
 #include <omp.h>
 
-#ifdef _NEC
+#ifdef _FTRACE
 #include <ftrace.h>
 #else
 //dummy macro

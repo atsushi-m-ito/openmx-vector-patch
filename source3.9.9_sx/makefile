@@ -9,8 +9,16 @@
 CC = mpincc -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -fopenmp -mno-create-threads-at-startup -Dnosse -finline -finline-functions -finline-max-depth=5 -finline-max-function-size=500 -report-all
 #CC = mpincc -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -fopenmp -mno-create-threads-at-startup -I/opt/nec/ve/nlc/2.3.0/include -Dnosse -finline -finline-functions -finline-max-depth=5 -finline-max-function-size=500 -report-all
 FC = mpinfort -O4 -D_NEC -DASLFFTW_COMPLEX_LEGACY -mno-create-threads-at-startup -fopenmp -static 
-LIB=  -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp -ftrace
+LIB=  -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp #-ftrace
 #LIB= -L/opt/nec/ve/lib/ -L/opt/nec/ve/nlc/2.3.0/lib/ -laslfftw3_mpi -lasl_mpi_openmp -lscalapack -llapack -lblas_openmp -ftrace
+
+#
+# Ubuntu 18.04.4 LTS on WSL on Windows 10 (64bit)
+#
+# MKLROOT = /opt/intel/oneapi/mkl/2021.3.0/
+# CC = mpiicc -O3 -xHOST -ip -no-prec-div -qopenmp -I${MKLROOT}/include -I/opt/intel/oneapi/mkl/2021.3.0/include/fftw
+# FC = mpiifort -O3 -xHOST -ip -no-prec-div -qopenmp
+# LIB= -L${MKLROOT}/lib/intel64 -lmkl_scalapack_lp64 -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -lifcore -lmkl_blacs_intelmpi_lp64 -liomp5 -lpthread -lm -ldl
 
 #
 # System B (Sekirei) at ISSP, Univ. of Tokyo
