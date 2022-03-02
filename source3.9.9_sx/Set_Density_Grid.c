@@ -318,8 +318,7 @@ double Set_Density_Grid(int Cnt_kind, int Calc_CntOrbital_ON, double *****CDM, d
     gNthrds = omp_get_num_threads();
   }
 
-  double*** ai_tmpDG_all = (double***)malloc(sizeof(double**)*gNthrds);
-	
+  
   /* ========================== AITUNE */ 
 
 #pragma omp parallel shared(myid,G2ID,Orbs_Grid_FNAN,List_YOUSO,time_per_atom,Tmp_Den_Grid,Orbs_Grid,COrbs_Grid,Cnt_switch,Cnt_kind,GListTAtoms2,GListTAtoms1,NumOLG,CDM,SpinP_switch,WhatSpecies,ncn,F_G2M,natn,Spe_Total_CNO,M2G) private(OMPID,Nthrds,Mc_AN,h_AN,Stime_atom,Etime_atom,Gc_AN,Cwan,NO0,Gh_AN,Mh_AN,Rnh,Hwan,NO1,spin,i,j,Nog,Nc_0,Nc_1,Nc_2,Nc_3,Nh_0,Nh_1,Nh_2,Nh_3,sum_0,sum_1,sum_2,sum_3,tmp0_0,tmp0_1,tmp0_2,tmp0_3,Nc,Nh,sum,tmp0)

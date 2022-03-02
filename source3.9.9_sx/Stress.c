@@ -7613,11 +7613,15 @@ void dHNL(int where_flag,
   Sumx = (double**)malloc(sizeof(double*)*ian);
   Sumy = (double**)malloc(sizeof(double*)*ian);
   Sumz = (double**)malloc(sizeof(double*)*ian);
-  for(m=0; m<ian; m++){
-    Sumx[m] = (double*)malloc(sizeof(double)*jan);
-    Sumy[m] = (double*)malloc(sizeof(double)*jan);
-    Sumz[m] = (double*)malloc(sizeof(double)*jan);
+  Sumx[0] = (double*)malloc(sizeof(double)*jan*ian);
+  Sumy[0] = (double*)malloc(sizeof(double)*jan*ian);
+  Sumz[0] = (double*)malloc(sizeof(double)*jan*ian);
+  for(m=1; m<ian; m++){
+    Sumx[m] = Sumx[m] + m * jan;
+    Sumy[m] = Sumy[m] + m * jan;
+    Sumz[m] = Sumz[m] + m * jan;
   }
+
   double *Sumx_, *Sumy_, *Sumz_;
   Sumx_ = (double*)malloc(sizeof(double*)*ian*jan);
   Sumy_ = (double*)malloc(sizeof(double*)*ian*jan);
@@ -7717,7 +7721,7 @@ void dHNL(int where_flag,
       }
     }	
 	else
-{
+  {
       for (int x=0; x<ian*jan; x++){
         m = x/jan;
         n = x%jan;
@@ -7732,8 +7736,8 @@ void dHNL(int where_flag,
           Sumz_[x] += ene*DS_NL1[0][3][Mc_AN][k][m][l3]*DS_NL1[0][0][Mj_AN2][kl][n][l3];
       }
     }
-}
-   #endif
+  }
+#endif
 
 #ifndef _NEC
     for (m=0; m<ian; m++){
@@ -8009,6 +8013,11 @@ free(eneValues);
 
     } /* k */
 #ifdef _NEC
+free(tno0_m);
+free(tno0_n);
+free(Sumx[0]);
+free(Sumy[0]);
+free(Sumz[0]);
 free(Sumx);
 free(Sumy);
 free(Sumz);

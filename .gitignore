@@ -3,6 +3,7 @@
 /dist
 /public
 /note
+/leakdetect
 /source3.8.5_sx/
 /source3.9.9_org/
 /source3.9.9_sx/*
@@ -42,5 +43,8 @@
 !/source3.9.9_sx/MD_pac.c
 #!/source3.9.9_sx/elpa-2018.05.001/elpa1_merge_systems_real_template.F90   accepted by official patch 3.9.6
 
+#memory leak for original
+!/source3.9.9_sx/Free_Arrays.c
+!/source3.9.9_sx/Input_std.c
 
 
