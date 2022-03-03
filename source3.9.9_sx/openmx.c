@@ -537,11 +537,6 @@ int main(int argc, char *argv[])
 
   init();
 
-  /* for DFTD-vdW by okuno */
-  /* for version_dftD by Ellner*/
-  if (dftD_switch==1 && version_dftD==2) DFTDvdW_init();
-  if (dftD_switch==1 && version_dftD==3) DFTD3vdW_init();
-
   /* check "-mltest2" mode */
 
   po = 0;
@@ -640,9 +635,12 @@ int main(int argc, char *argv[])
   ****************************************************/
 
   MD_iter = 1;
-  Temp_MD_iter = 1;
 
   do {
+
+    /* for DFT-D2 by okuno and DFT-D3 by Ellner, and modified by Ozaki */
+    if (dftD_switch==1 && version_dftD==2) DFTDvdW_init(MD_iter);   /* DFT-D2 */
+    if (dftD_switch==1 && version_dftD==3) DFTD3vdW_init(MD_iter);  /* DFT-D3 */
 
     if (MD_switch==12)
       CompTime[myid][2] += truncation(1,1);  /* EvsLC */
@@ -678,7 +676,6 @@ int main(int argc, char *argv[])
     }
 
     MD_iter++;
-    Temp_MD_iter++;
 
   } while(MD_Opt_OK==0 && (MD_iter+MD_Current_Iter)<=MD_IterNumber);
 

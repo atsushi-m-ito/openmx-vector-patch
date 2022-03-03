@@ -1213,11 +1213,10 @@ void Cell_Opt_SD(int iter, int SD_scaling_flag)
       for (j=1; j<=3; j++){
 	if (atom_Fixed_XYZ[Gc_AN][j]==0){
 	  tmp0 += Gxyz[Gc_AN][16+j]*Gxyz[Gc_AN][16+j];
+
+          if ( My_Max_Force < fabs(Gxyz[Gc_AN][16+j]) ) My_Max_Force = fabs(Gxyz[Gc_AN][16+j]);
 	}
       }
-
-      tmp0 = sqrt(tmp0); 
-      if (My_Max_Force<tmp0) My_Max_Force = tmp0;
     }
 
     MPI_Allreduce(&My_Max_Force, &Max_Force, 1, MPI_DOUBLE, MPI_MAX, mpi_comm_level1);
@@ -9098,6 +9097,392 @@ double defaultMassBarostat( void )
 // Velocity-Scaling and Parrinello-Rahman method
 void NPT_VS_PR(int iter)
 {
+  // relative internal coordinates for atoms
+  double   coords[atomnum+1][4]; // position
+  double  dcoords[atomnum+1][4]; // velocity
+  double d2coords[atomnum+1][4]; // acceleration
+
+  // lattice dynamics
+  double d2L[4][4];       // acceleration
+  double dL[4][4];        // velocity
+
+  // lattice vectors
+  double L[4][4]; // real lattice vectors
+  double K[4][4]; // reciprocal lattice vectors
+
+  // misc matrices for Parrinello-Rahman method
+  double Sigma[4][4], G[4][4], dG[4][4], invG[4][4], invGdG[4][4];
+
+  // work matrices
+  double Wa[4][4], Wb[4][4];
+
+  // indexes
+  int i, j, k; // abc-axes
+  int al, be;  // xyz-coordinates
+  int ai, a;   // local and global atom indexes
+
+  int numprocs, myid;
+
+  MPI_Comm_size(mpi_comm_level1,&numprocs);
+  MPI_Comm_rank(mpi_comm_level1,&myid);
+  MPI_Barrier(mpi_comm_level1);
+
+  double dt = 41.3411*MD_TimeStep;
+  double Wscale = unified_atomic_mass_unit/electron_mass;
+
+  //---- VS PR Step 0. set dL
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] = tv_velocity[i][al];
+    }
+  }
+
+  if ( iter == 1 ){
+    if ( PresW == 0.0 ) PresW = defaultMassBarostat();
+  }
+
+  //---- VS PR Step 1. setup L from tv
+
+  // L = (tv[1],tv[2],tv[3])
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] = tv[i][al];
+    }
+  }
+
+  //---- VS PR Step 2. setup misc matrices
+
+  // Sigma = (L2*L3,L3*L1,L1*L2)
+  Cross_Product( L[2], L[3], Sigma[1] );
+  Cross_Product( L[3], L[1], Sigma[2] );
+  Cross_Product( L[1], L[2], Sigma[3] );
+
+  // Omega, Cell_Volume
+  double Omega = Dot_Product( Sigma[1], L[1] );
+
+  // K = Sigma/Omega
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      K[i][al] = Sigma[i][al]/Omega;
+    }
+  }
+
+  // G[i][j] = sum_al L[i][al] * L[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      G[i][j] = Dot_Product( L[i], L[j] );
+    }
+  }
+
+  // dG[i][j] = sum_al dL[i][al] * L[j][al] +  L[i][al] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      dG[i][j] = Dot_Product( dL[i], L[j] ) + Dot_Product( L[i], dL[j] );
+    }
+  }
+
+  // (1/G)[i][j] = sum_al Sigma[i][al] * Sigma[j][al] /Omega^2
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invG[i][j] = Dot_Product( Sigma[i], Sigma[j] )/(Omega*Omega);
+    }
+  }
+
+  //  (1/G*dG)[i][j] = sum_k invG[i][k]*dG[k][j] = sum_k invG[i][k]*dG[j][k]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invGdG[i][j] = Dot_Product( invG[i], dG[j] ); // dG is symmetric
+    }
+  }
+
+  //---- VS PR Step 3. setup coords from Gxyz
+
+  // coords = sum_al K[i][al] * (POSITION[al]-Origin[al])
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i]  = Dot_Product( K[i], POSITION(Gxyz[a]) )
+	- Dot_Product( K[i], Grid_Origin );
+    }
+  }
+
+  // dcoords = sum_al K[i][al] * VELOCITY[al]
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] = Dot_Product( K[i], VELOCITY(Gxyz[a]) );
+    }
+  }
+
+  //---- VS PR Step 4. calculate accel of coords
+
+  // d2coords = - K*grad/m - (invG*dG)*dcoord
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      d2coords[a][i] =
+	- Dot_Product( K[i], GRADIENT(Gxyz[a]) )/ATOMIC_MASS(Gxyz[a])
+	- Dot_Product( invGdG[i], dcoords[a] );
+    }
+  }
+
+  //---- VS PR Step 5. evolve dcoords
+
+  // evolve dcoords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] += d2coords[a][i]*dt;
+    }
+  }
+
+  //---- VS PR Step 6. calc kinetic energy, temperature, and scaling factor
+
+  // calc kinetic energy of atomic motion
+  Ukc = 0.0;
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+
+    double velocity[4];
+    for( al=1; al<=3; al++ ){
+      velocity[al] = 0.0;
+      for( i=1; i<=3; i++ ){
+	velocity[al] += dcoords[a][i]*L[i][al];
+      }
+    }
+    Ukc += 0.5*ATOMIC_MASS(Gxyz[a])*Dot_Product( velocity, velocity );
+  }
+  MPI_Allreduce( MPI_IN_PLACE, &Ukc, 1, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // calc kinetic temperature
+  Temp = 2.0/(3.0*atomnum*(kB/eV2Hartree)) * Ukc;
+
+  // calc given temperature and scaling factor
+  double scale = 1.0;
+  for( i=1; i<=TempNum; i++ ){
+    int iter_begin    = TempPara[i-1][1];
+    int iter_end      = TempPara[i][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenTemp = TempPara[i-1][2] + (TempPara[i][2] - TempPara[i-1][2])*x;
+      if( iter==1 || (iter-iter_begin) % IntScale[i] ==0 && fabs(GivenTemp-Temp)>TempTol ){
+	double s = RatScale[i];
+	scale = Temp<GivenTemp*1.0e-8 ? 1.0 :
+	  sqrt( (GivenTemp + (Temp-GivenTemp)*s)/Temp );
+      }
+      break;
+    }
+  }
+
+  //  printf("GivenTemp %f Temp %f\n", GivenTemp, Temp );
+
+  //---- VS PR Step 7. scale velocities if required
+  if( scale != 1.0 ){
+    for( ai=1; ai<=Matomnum; ai++ ){
+      a = M2G[ai];
+      for( i=1; i<=3; i++ ){
+	dcoords[a][i] *= scale;
+      }
+    }
+  }
+
+  //---- VS PR Step 8. evolve coords
+  // evolve coords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i] += dcoords[a][i]*dt;
+    }
+  }
+
+  //---- VS PR Step 9. calculate accel of lattice vectors
+
+  // update GivenPressure
+  double GivenPres;
+  for( i=1; i<=PreNum; i++ ){
+    int iter_begin    = PrePara[i-1][1];
+    int iter_end      = PrePara[i  ][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenPres = PrePara[i-1][2] + (PrePara[i][2] - PrePara[i-1][2])*x;
+      break;
+    }
+  }
+
+  // Wa = sum_a dcoords*dcoords*mass
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      Wa[i][j] = 0.0;
+      for( ai=1; ai<=Matomnum; ai++ ){
+	a = M2G[ai];
+	Wa[i][j] += dcoords[a][i]*dcoords[a][j]*ATOMIC_MASS(Gxyz[a]);
+      }
+    }
+  }
+  MPI_Allreduce( MPI_IN_PLACE, Wa, 4*4, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // Wb = (sum_abcabc L[abc][xyz]*Wa[abc][abc]*L[abc][xyz]/Omega + Stress[xyz][xyz]
+  //    - Pressure[xyz][xyz])/PresW
+  for( al=1; al<=3; al++ ){
+    for( be=1; be<=3; be++ ){
+      Wb[al][be] = 0.0;
+      for( i=1; i<=3; i++ ){
+	for( j=1; j<=3; j++ ){
+	  Wb[al][be] += L[i][al] * Wa[i][j] * L[j][be];
+	}
+      }
+      Wb[al][be] /= Omega;
+      Wb[al][be] += getStress(al,be,Omega);
+      Wb[al][be] -= GivenPres*(al==be ? 1.0 : 0.0)*(double)MD_applied_pressure_flag[al-1];
+      Wb[al][be] /= PresW;
+    }
+  }
+
+  // restrict lattice vector
+  if( LatticeRestriction == 1 ){ // cubic
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+    Wb[1][1] = Wb[2][2] = Wb[3][3] = (Wb[1][1]+Wb[2][2]+Wb[3][3])/3.0;
+  }
+  else if( LatticeRestriction == 2 ){ // ortho
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+  }
+
+  // d2L = Wb*Sigma
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      d2L[i][al] = Dot_Product( Wb[al], Sigma[i] );
+    }
+  }
+
+  //---- VS PR Step 10. evolve dL and L
+
+  // evolve dL by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] += d2L[i][al] * dt;
+      tv_velocity[i][al] = dL[i][al];
+    }
+  }
+
+  // evolve L by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] += dL[i][al] * dt;
+    }
+  }
+
+  //---- VS PR Step 11. update Gxyz from coords
+
+  // update position, velocity
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( al=1; al<=3; al++ ){
+
+      /* store the coordinates at the previous step */
+
+      Gxyz[a][20+al] = Gxyz[a][al];
+
+      /* update the coordinates */
+
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	POSITION(Gxyz[a])[al] = Grid_Origin[al];
+	for( i=1; i<=3; i++ ){
+	  POSITION(Gxyz[a])[al] += coords[a][i]*L[i][al];
+	}
+      }
+    }
+
+    for( al=1; al<=3; al++ ){
+
+      /* update the velocity */
+      
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	VELOCITY(Gxyz[a])[al] = 0.0;
+	for( i=1; i<=3; i++ ){
+	  VELOCITY(Gxyz[a])[al] += dcoords[a][i]*L[i][al];
+	}
+      }
+    }
+  }
+
+  // update all positions and velocities
+  for( a=1; a<=atomnum; a++ ){
+    MPI_Bcast(&Gxyz[a][0], 33, MPI_DOUBLE, G2ID[a], mpi_comm_level1);
+  }
+
+  //---- VS PR Step 12. update tv and rtv from L
+
+  // update tv
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      tv[i][al] = L[i][al];
+    }
+  }
+
+  // update rtv, Cell_Volume
+  // rtv = (L2*L3,L3*L1,L1*L2)/Omega*2*Pi
+
+  Cross_Product( tv[2], tv[3], rtv[1] );
+  Cross_Product( tv[3], tv[1], rtv[2] );
+  Cross_Product( tv[1], tv[2], rtv[3] );
+  Cell_Volume = fabs(Dot_Product( rtv[1], tv[1] ));
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      rtv[i][al] = rtv[i][al]/Cell_Volume*2*M_PI;
+    }
+  }
+
+  //---- VS PR Step 13. calc Hamiltonian as the conserved quantity
+  double TrdLdL = 0.0;
+  for( i=1; i<=3; i++ ){
+    TrdLdL += Dot_Product( dL[i], dL[i] );
+  }
+  double Ubaro = 0.5*PresW*TrdLdL;
+  double Wbaro = GivenPres*Omega;
+  double Ham = Utot + Ukc + Ubaro + Wbaro;
+
+  if ( myid == 0 ){
+
+    static int first = 1;
+    static FILE* fptr;
+    static char fileE[YOUSO10];
+
+    if ( first ){
+      first = 0;
+      
+      sprintf(fileE,"%s%s.npt.ene",filepath,filename);
+      
+      fptr = fopen(fileE,"r");
+
+      if (fptr==NULL) fptr = fopen(fileE,"w");
+      else            fptr = fopen(fileE,"a");
+
+      fprintf( fptr, "# NPT_VS_PR TimeStep=%e (fs) MassBarostat=%e (atomic mass unit)\n", 
+               MD_TimeStep, PresW/(unified_atomic_mass_unit/electron_mass) );
+      fprintf( fptr, "#  1:iter 2:time  3:Volume 4:Temp    5:Stress   6:Utot   7:Ukc    8:Ubaro  9:Wbaro    10:Hamiltonian\n");
+    }
+    else{
+      fptr = fopen(fileE,"a");
+    }  
+
+    fprintf( fptr, "%4d %f %f %f %f %f %f %f %f %f\n", iter, MD_TimeStep*(double)iter,
+	     fabs(Omega), Temp, 
+             (getStress(1,1,Omega)+getStress(2,2,Omega)+getStress(3,3,Omega))*29.42*1000/3.0, /* 1/(0.3398827*0.0001) */
+	     Utot, Ukc, Ubaro, Wbaro, Ham );
+
+    fflush(fptr);
+    fclose(fptr);
+  }
+
 } // NPT_VS_PR
 
 
@@ -9107,6 +9492,504 @@ void NPT_VS_PR(int iter)
 // Velocity-Scaling and Wentzcovitch method
 void NPT_VS_WV(int iter)
 {
+  // relative internal coordinates for atoms
+  double   coords[atomnum+1][4]; // position
+  double  dcoords[atomnum+1][4]; // velocity
+  double d2coords[atomnum+1][4]; // acceleration
+
+  // lattice dynamics
+  double d2L[4][4]; // acceleration
+  double dL[4][4]; // velocity, preserved for next calls
+
+  // lattice vectors
+  double L[4][4]; // real lattice vectors
+  double K[4][4]; // reciprocal lattice vectors
+
+  // misc matrices for Wentzcovitch method
+  double Sigma[4][4], G[4][4], dG[4][4], invG[4][4], invGdG[4][4];
+  double E[4][4], F[4][4], invF[4][4], dF[4][4];
+  double SigmaP[4][4][4][4], FP[4][4][4][4];
+  double TrEFP[4][4], dSigma[4][4], dLdF[4][4];
+  static double F0[4][4]; // F at the initial step
+
+  // work matrices
+  double Wa[4][4], Wb[4][4];
+
+  // indexes
+  int i, j, k; // abc-axes
+  int al, be;  // xyz-coordinates
+  int ai, a;   // local and global atom indexes
+
+  int numprocs, myid;
+
+  MPI_Comm_size(mpi_comm_level1,&numprocs);
+  MPI_Comm_rank(mpi_comm_level1,&myid);
+  MPI_Barrier(mpi_comm_level1);
+
+  double dt = 41.3411*MD_TimeStep;
+  double Wscale = unified_atomic_mass_unit/electron_mass;
+
+  //---- VS WV Step 0. initialize dL[i][al] = 0
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] = tv_velocity[i][al];
+    }
+  }
+
+  if ( iter == 1 ){
+    if ( PresW == 0.0 ) PresW = defaultMassBarostat();
+  }
+
+  //---- VS WV Step 1. setup L from tv
+
+  // L = (tv[1],tv[2],tv[3])
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] = tv[i][al];
+    }
+  }
+
+  //---- VS WV Step 2. setup misc matrices
+
+  // Sigma = (L2*L3,L3*L1,L1*L2)
+  Cross_Product( L[2], L[3], Sigma[1] );
+  Cross_Product( L[3], L[1], Sigma[2] );
+  Cross_Product( L[1], L[2], Sigma[3] );
+
+  // Omega, Cell_Volume
+  double Omega = Dot_Product( Sigma[1], L[1] );
+
+  // K = Sigma/Omega
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      K[i][al] = Sigma[i][al]/Omega;
+    }
+  }
+
+  // G[i][j] = sum_al L[i][al] * L[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      G[i][j] = Dot_Product( L[i], L[j] );
+    }
+  }
+
+  // dG[i][j] = sum_al dL[i][al] * L[j][al] +  L[i][al] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      dG[i][j] = Dot_Product( dL[i], L[j] ) + Dot_Product( L[i], dL[j] );
+    }
+  }
+
+  // (1/G)[i][j] = sum_al Sigma[i][al] * Sigma[j][al] /Omega^2
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invG[i][j] = Dot_Product( Sigma[i], Sigma[j] )/(Omega*Omega);
+    }
+  }
+
+  //  (1/G*dG)[i][j] = sum_k invG[i][k]*dG[k][j] = sum_k invG[i][k]*dG[j][k]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invGdG[i][j] = Dot_Product( invG[i], dG[j] ); // dG is symmetric
+    }
+  }
+
+  // E[i][j] = sum_al dL[i][al] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      E[i][j] = Dot_Product( dL[i], dL[j] );
+    }
+  }
+
+  // F[i][j] = sum_al L[i][al] * L[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      F[i][j] = Dot_Product( Sigma[i], Sigma[j] );
+      if( iter==1 ){
+	F0[i][j] = F[i][j];
+        NPT_WV_F0[i][j] = F0[i][j]; 
+      }
+      else{
+	F0[i][j] = NPT_WV_F0[i][j];
+      }
+    }
+  }
+
+  // invF[i][j] = sum_al L[i][al] * L[j][al] / Omega^2
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invF[i][j] = Dot_Product( L[i], L[j] )/(Omega*Omega);
+    }
+  }
+
+  // SigmaP
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      for( j=1; j<=3; j++ ){
+	for( be=1; be<=3; be++ ){
+	  SigmaP[i][al][j][be] =
+	    (Sigma[i][al]*Sigma[j][be] - Sigma[j][al]*Sigma[i][be])/Omega;
+	}
+      }
+    }
+  }
+
+  // dSigma[i][al] = sum_j sum_be SigmaP[i][al][j][be] * dL[j][be]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dSigma[i][al] = 0.0;
+      for( j=1; j<=3; j++ ){
+	for( be=1; be<=3; be++ ){
+	  dSigma[i][al] += SigmaP[i][al][j][be] * dL[j][be];
+	}
+      }
+    }
+  }
+
+  // dF[i][j] = sum_al dSigma[i][al] * Sigma[j][al] + Sigma[i][al] * dSigma[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      dF[i][j] = Dot_Product( dSigma[i], Sigma[j] )
+	+ Dot_Product( dSigma[i], Sigma[j] );
+    }
+  }
+
+  // FP[i][al][j][k] = sum_be SigmaP[i][al][j][be] * Sigma[k][be] + Sigma[j][be]*SigmaP[i][al][k][be]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      for( j=1; j<=3; j++ ){
+	for( k=1; k<=3; k++ ){
+	  FP[i][al][j][k] = Dot_Product( SigmaP[i][al][j], Sigma[k] )
+	    + Dot_Product( Sigma[j], SigmaP[i][al][k] );
+	}
+      }
+    }
+  }
+
+  // TrEFP[i][al] = sum_jk E[j][k] * FP[i][al][j][k]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      TrEFP[i][al] = 0.0;
+      for( j=1; j<=3; j++ ){
+	for( k=1; k<=3; k++ ){
+	  TrEFP[i][al] += E[j][k] * FP[i][al][j][k];
+	}
+      }
+    }
+  }
+
+  // dLdF[i][al] = sum_j dF[i][j] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dLdF[i][al] = 0.0;
+      for( j=1; j<=3; j++ ){
+	dLdF[i][al] += dF[i][j] * dL[j][al];
+      }
+    }
+  }
+
+  //---- VS WV Step 3. setup coords from Gxyz
+
+  // coords = sum_al K[i][al] * (POSITION[al]-Origin[al])
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i]  = Dot_Product( K[i], POSITION(Gxyz[a]) )
+	- Dot_Product( K[i], Grid_Origin );
+    }
+  }
+
+  // dcoords = sum_al K[i][al] * VELOCITY[al]
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] = Dot_Product( K[i], VELOCITY(Gxyz[a]) );
+    }
+  }
+
+  //---- VS WV Step 4. calculate accel of coords
+
+  // d2coords = - K*grad/m - (invG*dG)*dcoord
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      d2coords[a][i] =
+	- Dot_Product( K[i], GRADIENT(Gxyz[a]) )/ATOMIC_MASS(Gxyz[a])
+	- Dot_Product( invGdG[i], dcoords[a] );
+    }
+  }
+
+  //---- VS WV Step 5. evolve dcoords
+
+  // evolve dcoords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] += d2coords[a][i]*dt;
+    }
+  }
+
+  //---- VS WV Step 6. calc kinetic energy, temperature, and scaling factor
+
+  // calc kinetic energy of atomic motion
+  Ukc = 0.0;
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+
+    double velocity[4];
+    for( al=1; al<=3; al++ ){
+      velocity[al] = 0.0;
+      for( i=1; i<=3; i++ ){
+	velocity[al] += dcoords[a][i]*L[i][al];
+      }
+    }
+    Ukc += 0.5*ATOMIC_MASS(Gxyz[a])*Dot_Product( velocity, velocity );
+  }
+  MPI_Allreduce( MPI_IN_PLACE, &Ukc, 1, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // calc kinetic temperature
+  Temp = 2.0/(3.0*atomnum*(kB/eV2Hartree)) * Ukc;
+
+  // calc given temperature and scaling factor
+  double scale = 1.0;
+  for( i=1; i<=TempNum; i++ ){
+    int iter_begin    = TempPara[i-1][1];
+    int iter_end      = TempPara[i][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenTemp = TempPara[i-1][2] + (TempPara[i][2] - TempPara[i-1][2])*x;
+      if( iter==1 || (iter-iter_begin) % IntScale[i] ==0 && fabs(GivenTemp-Temp)>TempTol ){
+	double s = RatScale[i];
+	scale = Temp<GivenTemp*1.0e-8 ? 1.0 :
+	  sqrt( (GivenTemp + (Temp-GivenTemp)*s)/Temp );
+      }
+      break;
+    }
+  }
+
+  //  printf("GivenTemp %f Temp %f\n", GivenTemp, Temp );
+
+  //---- VS WV Step 7. scale velocities if required
+  if( scale != 1.0 ){
+    for( ai=1; ai<=Matomnum; ai++ ){
+      a = M2G[ai];
+      for( i=1; i<=3; i++ ){
+	dcoords[a][i] *= scale;
+      }
+    }
+  }
+
+  //---- VS WV Step 8. evolve coords
+  // evolve coords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i] += dcoords[a][i]*dt;
+    }
+  }
+
+  //---- VS WV Step 9. calculate accel of lattice vectors
+
+  // update GivenPressure
+  double GivenPres;
+  for( i=1; i<=PreNum; i++ ){
+    int iter_begin    = PrePara[i-1][1];
+    int iter_end      = PrePara[i  ][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenPres = PrePara[i-1][2] + (PrePara[i][2] - PrePara[i-1][2])*x;
+      break;
+    }
+  }
+
+  // Wa = sum_a dcoords*dcoords*mass
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      Wa[i][j] = 0.0;
+      for( ai=1; ai<=Matomnum; ai++ ){
+	a = M2G[ai];
+	Wa[i][j] += dcoords[a][i]*dcoords[a][j]*ATOMIC_MASS(Gxyz[a]);
+      }
+    }
+  }
+  MPI_Allreduce( MPI_IN_PLACE, Wa, 4*4, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // Wb = (sum_abcabc L[abc][xyz]*Wa[abc][abc]*L[abc][xyz]/Omega + Stress[xyz][xyz]
+  //    - Pressure[xyz][xyz])/PresW
+  for( al=1; al<=3; al++ ){
+    for( be=1; be<=3; be++ ){
+      Wb[al][be] = 0.0;
+      for( i=1; i<=3; i++ ){
+	for( j=1; j<=3; j++ ){
+	  Wb[al][be] += L[i][al] * Wa[i][j] * L[j][be];
+	}
+      }
+      Wb[al][be] /= Omega;
+      Wb[al][be] += getStress(al,be,Omega);
+      Wb[al][be] -= GivenPres*(al==be ? 1.0 : 0.0)*(double)MD_applied_pressure_flag[al-1];
+      Wb[al][be] /= PresW;
+    }
+  }
+
+  // restrict lattice vector
+  if( LatticeRestriction == 1 ){ // cubic
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+    Wb[1][1] = Wb[2][2] = Wb[3][3] = (Wb[1][1]+Wb[2][2]+Wb[3][3])/3.0;
+  }
+  else if( LatticeRestriction == 2 ){ // ortho
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+  }
+
+  // d2L = Wb*Sigma
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      d2L[i][al] = Dot_Product( Wb[al], Sigma[i] );
+    }
+  }
+
+  // Wa = d2L + 0.5*TrEFP - dLdF
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      Wa[i][al] = d2L[i][al] + 0.5*TrEFP[i][al] - dLdF[i][al];
+    }
+  }
+
+  // d2L[i][al] = sum_k Wa[k][al] * invF[i][k], Wentzcovitch
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      d2L[i][al] = 0.0;
+      for( k=1; k<=3; k++ ){
+	d2L[i][al] += Wa[k][al] * invF[i][k];
+      }
+    }
+  }
+
+  //---- VS WV Step 10. evolve dL and L
+
+  // evolve dL by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] += d2L[i][al] * dt;
+      tv_velocity[i][al] = dL[i][al];
+    }
+  }
+
+  // evolve L by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] += dL[i][al] * dt;
+    }
+  }
+
+  //---- VS WV Step 11. update Gxyz from coords
+
+  // update position, velocity
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( al=1; al<=3; al++ ){
+
+      /* store the coordinates at the previous step */
+
+      Gxyz[a][20+al] = Gxyz[a][al];
+
+      /* update the coordinates */
+
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	POSITION(Gxyz[a])[al] = Grid_Origin[al];
+	for( i=1; i<=3; i++ ){
+	  POSITION(Gxyz[a])[al] += coords[a][i]*L[i][al];
+	}
+      }
+    }
+    for( al=1; al<=3; al++ ){
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	VELOCITY(Gxyz[a])[al] = 0.0;
+	for( i=1; i<=3; i++ ){
+	  VELOCITY(Gxyz[a])[al] += dcoords[a][i]*L[i][al];
+	}
+      }
+    }
+  }
+
+  // update all positions and velocities
+  for( a=1; a<=atomnum; a++ ){
+    MPI_Bcast(&Gxyz[a][0], 33, MPI_DOUBLE, G2ID[a], mpi_comm_level1);
+  }
+
+  //---- VS WV Step 12. update tv from L
+
+  // update tv
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      tv[i][al] = L[i][al];
+    }
+  }
+
+  // update rtv, Cell_Volume
+  // rtv = (L2*L3,L3*L1,L1*L2)/Omega*2*Pi
+
+  Cross_Product( tv[2], tv[3], rtv[1] );
+  Cross_Product( tv[3], tv[1], rtv[2] );
+  Cross_Product( tv[1], tv[2], rtv[3] );
+  Cell_Volume = fabs(Dot_Product( rtv[1], tv[1] ));
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      rtv[i][al] = rtv[i][al]/Cell_Volume*2*M_PI;
+    }
+  }
+
+  //---- VS WV Step 13. calc Hamiltonian as the conserved quantity
+  double TrdLF0dL = 0.0;
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      TrdLF0dL += Dot_Product( dL[i], dL[i] ) * F0[i][j];
+    }
+  }
+
+  double Ubaro = 0.5*PresW*TrdLF0dL;
+  double Wbaro = GivenPres*Omega;
+  double Ham = Utot + Ukc + Ubaro + Wbaro;
+
+  if ( myid == 0 ){
+
+    static int first = 1;
+    static FILE* fptr;
+    static char fileE[YOUSO10];
+
+    if ( first ){
+      first = 0;
+      
+      sprintf(fileE,"%s%s.npt.ene",filepath,filename);
+      
+      fptr = fopen(fileE,"r");
+
+      if (fptr==NULL) fptr = fopen(fileE,"w");
+      else            fptr = fopen(fileE,"a");
+
+      fprintf( fptr, "# NPT_VS_WV TimeStep=%e (fs) MassBarostat=%e (atomic mass unit)\n", 
+               MD_TimeStep, PresW/(unified_atomic_mass_unit/electron_mass) );
+      fprintf( fptr, "#  1:iter 2:time  3:Volume 4:Temp    5:Stress   6:Utot   7:Ukc    8:Ubaro  9:Wbaro    10:Hamiltonian\n");
+    }
+    else{
+      fptr = fopen(fileE,"a");
+    }  
+
+    fprintf( fptr, "%4d %f %f %f %f %f %f %f %f %f\n", iter, MD_TimeStep*(double)iter,
+	     fabs(Omega), Temp, 
+             (getStress(1,1,Omega)+getStress(2,2,Omega)+getStress(3,3,Omega))*29.42*1000/3.0, /* 1/(0.3398827*0.0001) */
+	     Utot, Ukc, Ubaro, Wbaro, Ham );
+
+    fflush(fptr);
+    fclose(fptr);
+  }
+
 } // NPT_VS_WV
 
 
@@ -9114,6 +9997,400 @@ void NPT_VS_WV(int iter)
 // Nose-Hoover and Parrinello-Rahman method
 void NPT_NH_PR( int iter )
 {
+  // relative internal coordinates for atoms
+  double   coords[atomnum+1][4]; // position
+  double  dcoords[atomnum+1][4]; // velocity
+  double d2coords[atomnum+1][4]; // acceleration
+
+  // lattice dynamics
+  double d2L[4][4]; // acceleration
+  static double dL[4][4]; // velocity, preserved for next calls
+
+  // lattice vectors
+  double L[4][4]; // real lattice vectors
+  double K[4][4]; // reciprocal lattice vectors
+
+  // misc matrices for Parrinello-Rahman method
+  double Sigma[4][4], G[4][4], dG[4][4], invG[4][4], invGdG[4][4];
+
+  // work matrices
+  double Wa[4][4], Wb[4][4];
+
+  // indexes
+  int i, j, k; // abc-axes
+  int al, be; // xyz-coordinates
+  int ai, a; // local and global atom indexes
+
+  int numprocs, myid;
+
+  MPI_Comm_size(mpi_comm_level1,&numprocs);
+  MPI_Comm_rank(mpi_comm_level1,&myid);
+  MPI_Barrier(mpi_comm_level1);
+
+  double dt = 41.3411*MD_TimeStep;
+  double Wscale = unified_atomic_mass_unit/electron_mass;
+
+  //---- NH PR Step 0. initialize dL[i][al] = 0
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] = tv_velocity[i][al];
+    }
+  }
+
+  if( iter == 1 ){
+    if( PresW == 0.0 ) PresW = defaultMassBarostat();
+  }
+
+  // initialize thermostat
+
+  if( iter == 1 ){
+    NH_nzeta = 0.0;
+    NH_czeta = 0.0;
+    NH_R = 0.0;
+  }
+
+  //---- NH PR Step 1. setup L from tv
+
+  // L = (tv[1],tv[2],tv[3])
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] = tv[i][al];
+    }
+  }
+
+  //---- NH PR Step 2. setup misc matrices
+
+  // Sigma = (L2*L3,L3*L1,L1*L2)
+  Cross_Product( L[2], L[3], Sigma[1] );
+  Cross_Product( L[3], L[1], Sigma[2] );
+  Cross_Product( L[1], L[2], Sigma[3] );
+
+  // Omega, Cell_Volume
+  double Omega = Dot_Product( Sigma[1], L[1] );
+
+  // K = Sigma/Omega
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      K[i][al] = Sigma[i][al]/Omega;
+    }
+  }
+
+  // G[i][j] = sum_al L[i][al] * L[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      G[i][j] = Dot_Product( L[i], L[j] );
+    }
+  }
+
+  // dG[i][j] = sum_al dL[i][al] * L[j][al] +  L[i][al] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      dG[i][j] = Dot_Product( dL[i], L[j] ) + Dot_Product( L[i], dL[j] );
+    }
+  }
+
+  // (1/G)[i][j] = sum_al Sigma[i][al] * Sigma[j][al] /Omega^2
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invG[i][j] = Dot_Product( Sigma[i], Sigma[j] )/(Omega*Omega);
+    }
+  }
+
+  //  (1/G*dG)[i][j] = sum_k invG[i][k]*dG[k][j] = sum_k invG[i][k]*dG[j][k]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invGdG[i][j] = Dot_Product( invG[i], dG[j] ); // dG is symmetric
+    }
+  }
+
+  //---- NH PR Step 3. setup coords from Gxyz
+
+  // coords = sum_al K[i][al] * (POSITION[al]-Origin[al])
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i]  = Dot_Product( K[i], POSITION(Gxyz[a]) )
+	- Dot_Product( K[i], Grid_Origin );
+    }
+  }
+
+  // dcoords = sum_al K[i][al] * VELOCITY[al]
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] = Dot_Product( K[i], VELOCITY(Gxyz[a]) );
+    }
+  }
+
+  //---- NH PR Step 4. calculate accel of coords
+
+  // d2coords = - K*grad/m - (invG*dG)*dcoord
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      d2coords[a][i] =
+	- Dot_Product( K[i], GRADIENT(Gxyz[a]) )/ATOMIC_MASS(Gxyz[a])
+	- Dot_Product( invGdG[i], dcoords[a] );
+    }
+  }
+
+  // add Nose-Hoover
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      d2coords[a][i] -= NH_czeta*dcoords[a][i];
+    }
+  }
+
+  //---- NH PR Step 5. evolve dcoords
+
+  // evolve dcoords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] += d2coords[a][i]*dt;
+    }
+  }
+
+  //---- NH PR Step 6. calc kinetic energy, temperature, and scaling factor
+
+  // calc kinetic energy of atomic motion
+  Ukc = 0.0;
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+
+    double velocity[4];
+    for( al=1; al<=3; al++ ){
+      velocity[al] = 0.0;
+      for( i=1; i<=3; i++ ){
+	velocity[al] += dcoords[a][i]*L[i][al];
+      }
+    }
+    Ukc += 0.5*ATOMIC_MASS(Gxyz[a])*Dot_Product( velocity, velocity );
+  }
+  MPI_Allreduce( MPI_IN_PLACE, &Ukc, 1, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // calc kinetic temperature
+  Temp = 2.0/(3.0*atomnum*(kB/eV2Hartree)) * Ukc;
+
+  // calc given temperature
+  for( i=1; i<=TempNum; i++ ){
+    int iter_begin    = TempPara[i-1][1];
+    int iter_end      = TempPara[i][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenTemp = TempPara[i-1][2] + (TempPara[i][2] - TempPara[i-1][2])*x;
+      break;
+    }
+  }
+
+  //---- NH PR Step 7. evolve Nose-Hoover thermostat
+
+  double NH_dzeta = (double)atomnum*(kB/eV2Hartree)*(Temp-GivenTemp)/(TempQ*Wscale);
+
+  NH_nzeta = NH_czeta + NH_dzeta * dt;
+  NH_czeta = NH_nzeta;
+  NH_R = NH_R + NH_czeta*dt;
+
+  //---- NH PR Step 8. evolve coords
+  // evolve coords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i] += dcoords[a][i]*dt;
+    }
+  }
+
+  //---- NH PR Step 9. calculate accel of lattice vectors
+
+  // update GivenPressure
+  double GivenPres;
+  for( i=1; i<=PreNum; i++ ){
+    int iter_begin    = PrePara[i-1][1];
+    int iter_end      = PrePara[i  ][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenPres = PrePara[i-1][2] + (PrePara[i][2] - PrePara[i-1][2])*x;
+      break;
+    }
+  }
+
+  // Wa = sum_a dcoords*dcoords*mass
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      Wa[i][j] = 0.0;
+      for( ai=1; ai<=Matomnum; ai++ ){
+	a = M2G[ai];
+	Wa[i][j] += dcoords[a][i]*dcoords[a][j]*ATOMIC_MASS(Gxyz[a]);
+      }
+    }
+  }
+  MPI_Allreduce( MPI_IN_PLACE, Wa, 4*4, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // Wb = (sum_abcabc L[abc][xyz]*Wa[abc][abc]*L[abc][xyz]/Omega + Stress[xyz][xyz]
+  //    - Pressure[xyz][xyz])/PresW
+  for( al=1; al<=3; al++ ){
+    for( be=1; be<=3; be++ ){
+      Wb[al][be] = 0.0;
+      for( i=1; i<=3; i++ ){
+	for( j=1; j<=3; j++ ){
+	  Wb[al][be] += L[i][al] * Wa[i][j] * L[j][be];
+	}
+      }
+      Wb[al][be] /= Omega;
+      Wb[al][be] += getStress(al,be,Omega);
+      Wb[al][be] -= GivenPres*(al==be ? 1.0 : 0.0)*(double)MD_applied_pressure_flag[al-1];
+      Wb[al][be] /= PresW;
+    }
+  }
+
+  // restrict lattice vector
+  if( LatticeRestriction == 1 ){ // cubic
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+    Wb[1][1] = Wb[2][2] = Wb[3][3] = (Wb[1][1]+Wb[2][2]+Wb[3][3])/3.0;
+  }
+  else if( LatticeRestriction == 2 ){ // ortho
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+  }
+
+  // d2L = Wb*Sigma
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      d2L[i][al] = Dot_Product( Wb[al], Sigma[i] );
+    }
+  }
+
+  //---- NH PR Step 10. evolve dL and L
+
+  // evolve dL by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] += d2L[i][al] * dt;
+      tv_velocity[i][al] = dL[i][al];
+    }
+  }
+
+  // evolve L by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] += dL[i][al] * dt;
+    }
+  }
+
+  //---- NH PR Step 11. update Gxyz from coords
+
+  // update position, velocity
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( al=1; al<=3; al++ ){
+
+      /* store the coordinates at the previous step */
+
+      Gxyz[a][20+al] = Gxyz[a][al];
+
+      /* update the coordinates */
+
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	POSITION(Gxyz[a])[al] = Grid_Origin[al];
+	for( i=1; i<=3; i++ ){
+	  POSITION(Gxyz[a])[al] += coords[a][i]*L[i][al];
+	}
+      }
+    }
+
+    for( al=1; al<=3; al++ ){
+
+      /* update the velocity */
+
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	VELOCITY(Gxyz[a])[al] = 0.0;
+	for( i=1; i<=3; i++ ){
+	  VELOCITY(Gxyz[a])[al] += dcoords[a][i]*L[i][al];
+	}
+      }
+    }
+  }
+
+  // update all positions and velocities
+  for( a=1; a<=atomnum; a++ ){
+    MPI_Bcast(&Gxyz[a][0], 33, MPI_DOUBLE, G2ID[a], mpi_comm_level1);
+  }
+
+  //---- NH PR Step 12. update tv and rtv from L
+
+  // update tv
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      tv[i][al] = L[i][al];
+    }
+  }
+
+  // update rtv, Cell_Volume
+  // rtv = (L2*L3,L3*L1,L1*L2)/Omega*2*Pi
+
+  Cross_Product( tv[2], tv[3], rtv[1] );
+  Cross_Product( tv[3], tv[1], rtv[2] );
+  Cross_Product( tv[1], tv[2], rtv[3] );
+  Cell_Volume = fabs(Dot_Product( rtv[1], tv[1] ));
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      rtv[i][al] = rtv[i][al]/Cell_Volume*2*M_PI;
+    }
+  }
+
+  //---- NH PR Step 13. calc Hamiltonian as the conserved quantity
+  double TrdLdL = 0.0;
+  for( i=1; i<=3; i++ ){
+    TrdLdL += Dot_Product( dL[i], dL[i] );
+
+  }
+
+  double Uthermo = 0.5*NH_czeta*NH_czeta*TempQ*Wscale
+                 + 3.0*(double)atomnum*(kB/eV2Hartree)*GivenTemp*NH_R; 
+
+  double Ubaro = 0.5*PresW*TrdLdL;
+  double Wbaro = GivenPres*Omega;
+  double Ham = Utot + Ukc + Uthermo + Ubaro + Wbaro;
+
+  if ( myid == 0 ){
+
+    static int first = 1;
+    static FILE* fptr;
+    static char fileE[YOUSO10];
+
+    if ( first ){
+      first = 0;
+      
+      sprintf(fileE,"%s%s.npt.ene",filepath,filename);
+      
+      fptr = fopen(fileE,"r");
+
+      if (fptr==NULL) fptr = fopen(fileE,"w");
+      else            fptr = fopen(fileE,"a");
+
+      fprintf( fptr, "# NPT_NH_PR TimeStep=%e MassBarostat=%e\n", dt, PresW );
+      fprintf( fptr, "#  1:iter 2:Volume 3:Temp    4:Stress   5:Utot   6:Ukc    7:Ubaro  8:Wbaro    9:Hamiltonian\n");
+    }
+    else{
+      fptr = fopen(fileE,"a");
+    }  
+
+    fprintf( fptr, "%4d %f %f %+f %+f %f %f %f %+f\n", iter,
+	     fabs(Omega), Temp, (getStress(1,1,Omega)+getStress(2,2,Omega)+getStress(3,3,Omega))*29.42*1000/3.0,
+	     Utot, Ukc, Ubaro, Wbaro, Ham );
+
+    fflush(fptr);
+    fclose(fptr);
+  }
+
 } // NPT_NH_PR
 
 
@@ -9122,4 +10399,504 @@ void NPT_NH_PR( int iter )
 // Nose-Hoover and Wentzcovitch method
 void NPT_NH_WV( int iter )
 {
+  // relative internal coordinates for atoms
+  double   coords[atomnum+1][4]; // position
+  double  dcoords[atomnum+1][4]; // velocity
+  double d2coords[atomnum+1][4]; // acceleration
+
+  // lattice dynamics
+  double d2L[4][4]; // acceleration
+  static double dL[4][4]; // velocity, preserved for next calls
+
+  // lattice vectors
+  double L[4][4]; // real lattice vectors
+  double K[4][4]; // reciprocal lattice vectors
+
+  // misc matrices for Wentzcovitch method
+  double Sigma[4][4], G[4][4], dG[4][4], invG[4][4], invGdG[4][4];
+  double E[4][4], F[4][4], invF[4][4], dF[4][4];
+  double SigmaP[4][4][4][4], FP[4][4][4][4];
+  double TrEFP[4][4], dSigma[4][4], dLdF[4][4];
+  static double F0[4][4]; // F at the initial step
+
+  // work matrices
+  double Wa[4][4], Wb[4][4];
+
+  // indexes
+  int i, j, k; // abc-axes
+  int al, be; // xyz-coordinates
+  int ai, a; // local and global atom indexes
+
+  int numprocs, myid;
+
+  MPI_Comm_size(mpi_comm_level1,&numprocs);
+  MPI_Comm_rank(mpi_comm_level1,&myid);
+  MPI_Barrier(mpi_comm_level1);
+
+  double dt = 41.3411*MD_TimeStep;
+  double Wscale = unified_atomic_mass_unit/electron_mass;
+
+  //---- NH WV Step 0. initialize dL[i][al] = 0
+
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] = tv_velocity[i][al];
+    }
+  }
+
+  if( iter == 1 ){
+    if( PresW == 0.0 ) PresW = defaultMassBarostat();
+  }
+
+  // initialize thermostat
+
+  if( iter == 1 ){
+    NH_nzeta = 0.0;
+    NH_czeta = 0.0;
+    NH_R = 0.0;
+  }
+
+  //---- NH WV Step 1. setup L from tv
+
+  // L = (tv[1],tv[2],tv[3])
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] = tv[i][al];
+    }
+  }
+
+  //---- NH WV Step 2. setup misc matrices
+
+  // Sigma = (L2*L3,L3*L1,L1*L2)
+  Cross_Product( L[2], L[3], Sigma[1] );
+  Cross_Product( L[3], L[1], Sigma[2] );
+  Cross_Product( L[1], L[2], Sigma[3] );
+
+  // Omega, Cell_Volume
+  double Omega = Dot_Product( Sigma[1], L[1] );
+
+  // K = Sigma/Omega
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      K[i][al] = Sigma[i][al]/Omega;
+    }
+  }
+
+  // G[i][j] = sum_al L[i][al] * L[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      G[i][j] = Dot_Product( L[i], L[j] );
+    }
+  }
+
+  // dG[i][j] = sum_al dL[i][al] * L[j][al] +  L[i][al] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      dG[i][j] = Dot_Product( dL[i], L[j] ) + Dot_Product( L[i], dL[j] );
+    }
+  }
+
+  // (1/G)[i][j] = sum_al Sigma[i][al] * Sigma[j][al] /Omega^2
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invG[i][j] = Dot_Product( Sigma[i], Sigma[j] )/(Omega*Omega);
+    }
+  }
+
+  //  (1/G*dG)[i][j] = sum_k invG[i][k]*dG[k][j] = sum_k invG[i][k]*dG[j][k]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invGdG[i][j] = Dot_Product( invG[i], dG[j] ); // dG is symmetric
+    }
+  }
+
+  // E[i][j] = sum_al dL[i][al] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      E[i][j] = Dot_Product( dL[i], dL[j] );
+    }
+  }
+
+  // F[i][j] = sum_al L[i][al] * L[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      F[i][j] = Dot_Product( Sigma[i], Sigma[j] );
+      if( iter==1 ){
+	F0[i][j] = F[i][j];
+      }
+    }
+  }
+
+  // invF[i][j] = sum_al L[i][al] * L[j][al] / Omega^2
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      invF[i][j] = Dot_Product( L[i], L[j] )/(Omega*Omega);
+    }
+  }
+
+  // SigmaP
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      for( j=1; j<=3; j++ ){
+	for( be=1; be<=3; be++ ){
+	  SigmaP[i][al][j][be] =
+	    (Sigma[i][al]*Sigma[j][be] - Sigma[j][al]*Sigma[i][be])/Omega;
+	}
+      }
+    }
+  }
+
+  // dSigma[i][al] = sum_j sum_be SigmaP[i][al][j][be] * dL[j][be]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dSigma[i][al] = 0.0;
+      for( j=1; j<=3; j++ ){
+	for( be=1; be<=3; be++ ){
+	  dSigma[i][al] += SigmaP[i][al][j][be] * dL[j][be];
+	}
+      }
+    }
+  }
+
+  // dF[i][j] = sum_al dSigma[i][al] * Sigma[j][al] + Sigma[i][al] * dSigma[j][al]
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      dF[i][j] = Dot_Product( dSigma[i], Sigma[j] )
+	+ Dot_Product( dSigma[i], Sigma[j] );
+    }
+  }
+
+  // FP[i][al][j][k] = sum_be SigmaP[i][al][j][be] * Sigma[k][be] + Sigma[j][be]*SigmaP[i][al][k][be]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      for( j=1; j<=3; j++ ){
+	for( k=1; k<=3; k++ ){
+	  FP[i][al][j][k] = Dot_Product( SigmaP[i][al][j], Sigma[k] )
+	    + Dot_Product( Sigma[j], SigmaP[i][al][k] );
+	}
+      }
+    }
+  }
+
+  // TrEFP[i][al] = sum_jk E[j][k] * FP[i][al][j][k]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      TrEFP[i][al] = 0.0;
+      for( j=1; j<=3; j++ ){
+	for( k=1; k<=3; k++ ){
+	  TrEFP[i][al] += E[j][k] * FP[i][al][j][k];
+	}
+      }
+    }
+  }
+
+  // dLdF[i][al] = sum_j dF[i][j] * dL[j][al]
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dLdF[i][al] = 0.0;
+      for( j=1; j<=3; j++ ){
+	dLdF[i][al] += dF[i][j] * dL[j][al];
+      }
+    }
+  }
+
+  //---- NH WV Step 3. setup coords from Gxyz
+
+  // coords = sum_al K[i][al] * (POSITION[al]-Origin[al])
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i]  = Dot_Product( K[i], POSITION(Gxyz[a]) )
+	- Dot_Product( K[i], Grid_Origin );
+    }
+  }
+
+  // dcoords = sum_al K[i][al] * VELOCITY[al]
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] = Dot_Product( K[i], VELOCITY(Gxyz[a]) );
+    }
+  }
+
+  //---- NH WV Step 4. calculate accel of coords
+
+  // d2coords = - K*grad/m - (invG*dG)*dcoord
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      d2coords[a][i] =
+	- Dot_Product( K[i], GRADIENT(Gxyz[a]) )/ATOMIC_MASS(Gxyz[a])
+	- Dot_Product( invGdG[i], dcoords[a] );
+    }
+  }
+
+  // add Nose-Hoover
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      d2coords[a][i] -= NH_czeta*dcoords[a][i];
+    }
+  }
+
+  //---- NH WV Step 5. evolve dcoords
+
+  // evolve dcoords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      dcoords[a][i] += d2coords[a][i]*dt;
+    }
+  }
+
+  //---- NH WV Step 6. calc kinetic energy, temperature
+
+  // calc kinetic energy of atomic motion
+  Ukc = 0.0;
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+
+    double velocity[4];
+    for( al=1; al<=3; al++ ){
+      velocity[al] = 0.0;
+      for( i=1; i<=3; i++ ){
+	velocity[al] += dcoords[a][i]*L[i][al];
+      }
+    }
+    Ukc += 0.5*ATOMIC_MASS(Gxyz[a])*Dot_Product( velocity, velocity );
+  }
+  MPI_Allreduce( MPI_IN_PLACE, &Ukc, 1, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // calc kinetic temperature
+  Temp = 2.0/(3.0*atomnum*(kB/eV2Hartree)) * Ukc;
+
+  // calc given temperature
+  for( i=1; i<=TempNum; i++ ){
+    int iter_begin    = TempPara[i-1][1];
+    int iter_end      = TempPara[i][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenTemp = TempPara[i-1][2] + (TempPara[i][2] - TempPara[i-1][2])*x;
+      break;
+    }
+  }
+
+  //---- NH WV Step 7. evolve Nose-Hoover thermostat
+  double NH_dzeta = atomnum*(kB/eV2Hartree)*(Temp-GivenTemp)/(TempQ*Wscale);
+
+  NH_nzeta = NH_czeta + NH_dzeta * dt;
+  NH_czeta = NH_nzeta;
+  NH_R = NH_R + NH_czeta*dt;
+
+  //---- NH WV Step 8. evolve coords
+  // evolve coords by dt
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( i=1; i<=3; i++ ){
+      coords[a][i] += dcoords[a][i]*dt;
+    }
+  }
+
+  //---- NH WV Step 9. calculate accel of lattice vectors
+
+  // update GivenPressure
+  double GivenPres;
+  for( i=1; i<=PreNum; i++ ){
+    int iter_begin    = PrePara[i-1][1];
+    int iter_end      = PrePara[i  ][1];
+
+    if( iter_begin<iter && iter<=iter_end ){
+      double x = (double)(iter-iter_begin)/(iter_end-iter_begin);
+      GivenPres = PrePara[i-1][2] + (PrePara[i][2] - PrePara[i-1][2])*x;
+      break;
+    }
+  }
+
+  // Wa = sum_a dcoords*dcoords*mass
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      Wa[i][j] = 0.0;
+      for( ai=1; ai<=Matomnum; ai++ ){
+	a = M2G[ai];
+	Wa[i][j] += dcoords[a][i]*dcoords[a][j]*ATOMIC_MASS(Gxyz[a]);
+      }
+    }
+  }
+  MPI_Allreduce( MPI_IN_PLACE, Wa, 4*4, MPI_DOUBLE, MPI_SUM, mpi_comm_level1);
+
+  // Wb = (sum_abcabc L[abc][xyz]*Wa[abc][abc]*L[abc][xyz]/Omega + Stress[xyz][xyz]
+  //    - Pressure[xyz][xyz])/PresW
+  for( al=1; al<=3; al++ ){
+    for( be=1; be<=3; be++ ){
+      Wb[al][be] = 0.0;
+      for( i=1; i<=3; i++ ){
+	for( j=1; j<=3; j++ ){
+	  Wb[al][be] += L[i][al] * Wa[i][j] * L[j][be];
+	}
+      }
+      Wb[al][be] /= Omega;
+      Wb[al][be] += getStress(al,be,Omega);
+      Wb[al][be] -= GivenPres*(al==be ? 1.0 : 0.0)*(double)MD_applied_pressure_flag[al-1];
+      Wb[al][be] /= PresW;
+    }
+  }
+
+  // restrict lattice vector
+  if( LatticeRestriction == 1 ){ // cubic
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+    Wb[1][1] = Wb[2][2] = Wb[3][3] = (Wb[1][1]+Wb[2][2]+Wb[3][3])/3.0;
+  }
+  else if( LatticeRestriction == 2 ){ // ortho
+    Wb[1][2] = Wb[2][1] = 0.0;
+    Wb[1][3] = Wb[3][1] = 0.0;
+    Wb[2][3] = Wb[3][2] = 0.0;
+  }
+
+  // d2L = Wb*Sigma
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      d2L[i][al] = Dot_Product( Wb[al], Sigma[i] );
+    }
+  }
+
+  // Wa = d2L + 0.5*TrEFP - dLdF
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      Wa[i][al] = d2L[i][al] + 0.5*TrEFP[i][al] - dLdF[i][al];
+    }
+  }
+
+  // d2L[i][al] = sum_k Wa[k][al] * invF[i][k], Wentzcovitch
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      d2L[i][al] = 0.0;
+      for( k=1; k<=3; k++ ){
+	d2L[i][al] += Wa[k][al] * invF[i][k];
+      }
+    }
+  }
+
+  //---- NH WV Step 10. evolve dL and L
+
+  // evolve dL by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      dL[i][al] += d2L[i][al] * dt;
+      tv_velocity[i][al] = dL[i][al];
+    }
+  }
+
+  // evolve L by dt
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      L[i][al] += dL[i][al] * dt;
+    }
+  }
+
+  //---- NH WV Step 11. update Gxyz from coords
+
+  // update position, velocity
+  for( ai=1; ai<=Matomnum; ai++ ){
+    a = M2G[ai];
+    for( al=1; al<=3; al++ ){
+
+      /* store the coordinates at the previous step */
+
+      Gxyz[a][20+al] = Gxyz[a][al];
+
+      /* update the coordinates */
+
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	POSITION(Gxyz[a])[al] = Grid_Origin[al];
+	for( i=1; i<=3; i++ ){
+	  POSITION(Gxyz[a])[al] += coords[a][i]*L[i][al];
+	}
+      }
+    }
+    for( al=1; al<=3; al++ ){
+
+      /* update the velocity */
+
+      if( !FIXED(atom_Fixed_XYZ[a])[al] ){
+	VELOCITY(Gxyz[a])[al] = 0.0;
+	for( i=1; i<=3; i++ ){
+	  VELOCITY(Gxyz[a])[al] += dcoords[a][i]*L[i][al];
+	}
+      }
+    }
+  }
+
+  // update all positions and velocities
+  for( a=1; a<=atomnum; a++ ){
+    MPI_Bcast(&Gxyz[a][0], 33, MPI_DOUBLE, G2ID[a], mpi_comm_level1);
+  }
+
+  //---- NH WV Step 12. update tv from L
+
+  // update tv
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      tv[i][al] = L[i][al];
+    }
+  }
+
+  // update rtv, Cell_Volume
+  // rtv = (L2*L3,L3*L1,L1*L2)/Omega*2*Pi
+  Cross_Product( tv[2], tv[3], rtv[1] );
+  Cross_Product( tv[3], tv[1], rtv[2] );
+  Cross_Product( tv[1], tv[2], rtv[3] );
+  Cell_Volume = fabs(Dot_Product( rtv[1], tv[1] ));
+  for( i=1; i<=3; i++ ){
+    for( al=1; al<=3; al++ ){
+      rtv[i][al] = rtv[i][al]/Cell_Volume*2*M_PI;
+    }
+  }
+
+  //---- NH WV Step 13. calc Hamiltonian as the conserved quantity
+  double TrdLF0dL = 0.0;
+  for( i=1; i<=3; i++ ){
+    for( j=1; j<=3; j++ ){
+      TrdLF0dL += Dot_Product( dL[i], dL[i] ) * F0[i][j];
+    }
+  }
+  double Uthermo = 0.5*NH_czeta*NH_czeta*TempQ*Wscale
+    + 3.0*atomnum*(kB/eV2Hartree)*GivenTemp*NH_R; 
+  double Ubaro = 0.5*PresW*TrdLF0dL;
+  double Wbaro = GivenPres*Omega;
+  double Ham = Utot + Ukc + Ubaro + Wbaro;
+
+  if ( myid == 0 ){
+
+    static int first = 1;
+    static FILE* fptr;
+    static char fileE[YOUSO10];
+
+    if ( first ){
+      first = 0;
+      
+      sprintf(fileE,"%s%s.npt.ene",filepath,filename);
+      
+      fptr = fopen(fileE,"r");
+
+      if (fptr==NULL) fptr = fopen(fileE,"w");
+      else            fptr = fopen(fileE,"a");
+
+      fprintf( fptr, "# NPT_NH_WV TimeStep=%e MassBarostat=%e\n", dt, PresW );
+      fprintf( fptr, "#  1:iter 2:Volume 3:Temp    4:Stress   5:Utot   6:Ukc    7:Ubaro  8:Wbaro    9:Hamiltonian\n");
+    }
+    else{
+      fptr = fopen(fileE,"a");
+    }  
+
+    fprintf( fptr, "%4d %f %f %+f %+f %f %f %f %+f\n", iter,
+	     fabs(Omega), Temp, (getStress(1,1,Omega)+getStress(2,2,Omega)+getStress(3,3,Omega))*29.42*1000/3.0,
+	     Utot, Ukc, Ubaro, Wbaro, Ham );
+
+    fflush(fptr);
+    fclose(fptr);
+  }
+
 } // NPT_NH_WV

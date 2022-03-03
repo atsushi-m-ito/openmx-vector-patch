@@ -9,6 +9,7 @@
 Band_DFT_Col.c	        nothing
 Band_DFT_NonCol.c	    nothing
 Cluster_DFT_NonCol.c	nothing
+DFT.c               	nothing
 FT_PAO.c	            nothing
 Force.c	                nothing
 Gaunt.h	                nothing
